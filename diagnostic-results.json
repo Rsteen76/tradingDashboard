@@ -1,0 +1,37 @@
+{
+  "timestamp": "2025-06-24T19:22:53.160Z",
+  "tests": {
+    "mlServer": {
+      "status": "pass",
+      "message": "ML Server HTTP port active"
+    },
+    "tcpPort": {
+      "status": "pass",
+      "message": "NinjaTrader TCP port active"
+    },
+    "socketIO": {
+      "status": "pass",
+      "message": "Socket.IO connected",
+      "connected": true,
+      "dataReceived": true
+    },
+    "logFiles": {
+      "status": "pass",
+      "message": "Logs analyzed",
+      "errors": [],
+      "warnings": []
+    },
+    "processes": {
+      "status": "pass",
+      "message": "11 Node.js processes found",
+      "processes": 11
+    }
+  },
+  "summary": {
+    "critical_issues": [],
+    "warnings": [],
+    "recommendations": [
+      "System appears healthy"
+    ]
+  }
+}
