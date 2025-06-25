@@ -21,7 +21,7 @@ if errorlevel 1 (
 
 :: Start ML Server
 echo 📡 Starting ML Server...
-start "ML Server" cmd /c "cd /d d:\Coding\TradingDashboard && node server/ml-server.js"
+start "ML Server" cmd /c "cd /d d:\Coding\TradingDashboard && node ml-server.js"
 timeout /t 3 /nobreak > nul
 
 :: Start Web Dashboard  

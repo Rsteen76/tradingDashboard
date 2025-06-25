@@ -28,7 +28,7 @@ fi
 
 # Start ML Server
 echo "Starting ML Server..."
-cmd //c "start \"ML Server\" cmd /c \"cd /d d:\\Coding\\TradingDashboard && node server/ml-server.js\""
+cmd //c "start \"ML Server\" cmd /c \"cd /d d:\\Coding\\TradingDashboard && node ml-server.js\""
 sleep 3
 
 # Start Web Dashboard  

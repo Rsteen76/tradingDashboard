@@ -21,7 +21,7 @@ redis-server.exe redis.windows.conf
 
 ### 4. ML Server
 ```bash
-node server/ml-server.js
+node ml-server.js
 ```
 - **Port**: 8080
 - **Function**: Processes trading data, ML predictions
@@ -50,7 +50,7 @@ You need to manually start Redis and ensure PostgreSQL is running.
 ### Option 3: Manual (4 separate terminals)
 1. `cd redis && redis-server.exe redis.windows.conf`
 2. `node setup-database.js` (one-time setup)
-3. `node server/ml-server.js`
+3. `node ml-server.js`
 4. `npm run dev`
 
 ## Service Dependencies

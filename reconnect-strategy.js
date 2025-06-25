@@ -186,7 +186,7 @@ async function reconnectStrategy() {
   
   if (!mlServerConnected) {
     console.log('❌ ML Server is not running on port 8080')
-    console.log('💡 Solution: Run "node server/ml-server.js" first')
+    console.log('💡 Solution: Run "node ml-server.js" first')
     return
   }
   

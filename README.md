@@ -94,7 +94,7 @@ Your ScalperProWithML strategy is already configured to connect. The connection 
 Edit these files to customize:
 - `tailwind.config.js` - UI colors and themes
 - `src/app/globals.css` - Custom styling
-- `server/ml-server.js` - Server configuration
+- `ml-server.js` - Server configuration
 
 ## 📊 Data Flow
 
@@ -107,7 +107,7 @@ Edit these files to customize:
 
 ### Adding New Metrics
 1. Update the data interface in `src/app/page.tsx`
-2. Modify server processing in `server/ml-server.js`
+2. Modify server processing in `ml-server.js`
 3. Add new UI components in `src/components/`
 
 ### Theme Customization

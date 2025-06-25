@@ -2,9 +2,9 @@ const express = require('express')
 const http = require('http')
 const socketIo = require('socket.io')
 const net = require('net')
-const tf = require('@tensorflow/tfjs')
-require('@tensorflow/tfjs-backend-cpu')
-const { RandomForestClassifier } = require('random-forest-classifier')
+const tf = require('@tensorflow/tfjs-node') // Changed to tfjs-node
+const { RandomForestClassifier } = require('random-forest-classifier') // Reverted to original
+const { XGBoost } = require('ml-xgboost') // Added ml-xgboost
 const { Matrix } = require('ml-matrix')
 const MultivariateLinearRegression = require('ml-regression-multivariate-linear')
 const Queue = require('bull')
@@ -281,7 +281,7 @@ class MLModelManager {
     model.compile({
       optimizer: tf.train.adam(0.001),
       loss: 'binaryCrossentropy',
-      metrics: ['accuracy']
+      metrics: ['accuracy'] // Reverted to accuracy only for now
     })
 
     return model
@@ -301,7 +301,7 @@ class MLModelManager {
   }
 
   createTransformerModel() {
-    // CNN-based pattern recognition model (replacing non-existent multiHeadAttention)
+    // CNN-based pattern recognition model (reverted due to multiHeadAttention unavailability)
     const model = tf.sequential({
       layers: [
         // First conv layer for pattern detection
@@ -374,93 +374,31 @@ class MLModelManager {
       classifier: classifier,
       regressor: regressor,
       type: 'ensemble',
-      version: '1.2.0',
+      version: '1.2.0', // Original version
       featureImportance: null,
       trained: false
     })
-    logger.info('✅ Random Forest models created')
+    logger.info('✅ Random Forest models (random-forest-classifier) created');
   }
 
   async loadXGBoostModel() {
-    // Gradient Boosting implementation (replacing XGBoost)
-    class GradientBoostingClassifier {
-      constructor(params) {
-        this.nEstimators = params.nEstimators || 100
-        this.learningRate = params.eta || 0.3
-        this.maxDepth = params.max_depth || 6
-        this.trees = []
-        this.trained = false
-      }
-      
-      predict(features) {
-        if (!this.trained) {
-          // Initialize with simple weighted combination
-          let score = 0
-          features.forEach((feature, idx) => {
-            if (!isNaN(feature) && isFinite(feature)) {
-              score += feature * (0.1 + (idx * 0.01))
-            }
-          })
-          // Apply sigmoid-like transformation
-          return 1 / (1 + Math.exp(-score))
-        }
-        
-        // If trained, use ensemble prediction
-        let prediction = 0
-        this.trees.forEach(tree => {
-          prediction += tree.predict(features) * this.learningRate
-        })
-        return 1 / (1 + Math.exp(-prediction))
-      }
-      
-      train(features, labels) {
-        // Simplified boosting training
-        this.trees = []
-        let residuals = [...labels]
-        
-        for (let i = 0; i < Math.min(this.nEstimators, 20); i++) {
-          const tree = this.createWeakLearner(features, residuals)
-          this.trees.push(tree)
-          
-          // Update residuals
-          for (let j = 0; j < residuals.length; j++) {
-            const pred = tree.predict(features[j])
-            residuals[j] -= this.learningRate * pred
-          }
-        }
-        this.trained = true
-      }
-      
-      createWeakLearner(features, residuals) {
-        // Simple decision stump
-        return {
-          predict: (feature) => {
-            if (!Array.isArray(feature)) return 0
-            const avg = feature.reduce((a, b) => a + (isNaN(b) ? 0 : b), 0) / feature.length
-            return Math.tanh(avg)
-          }
-        }
-      }
-    }
-    
-    const model = new GradientBoostingClassifier({
-      nEstimators: 50,
+    const params = {
+      max_depth: 6,
       eta: 0.3,
-      max_depth: 6
-    })
-    
+      objective: 'binary:logistic',
+      eval_metric: 'auc'
+    };
+
+    // XGBoost model from ml-xgboost is not directly instantiated here without training data.
+    // It will be created/loaded during a training or loading phase.
     this.models.set('xgboost', {
-      model: model,
+      model: null, // This will hold the trained XGBoost instance.
       type: 'boosting',
-      version: '2.0.0',
-      params: {
-        max_depth: 6,
-        eta: 0.3,
-        objective: 'binary:logistic',
-        eval_metric: 'auc'
-      }
-    })
-    logger.info('✅ Gradient Boosting model created')
+      version: '2.0.1', // Incremented version
+      params: params, // Store params for training
+      trained: false
+    });
+    logger.info('✅ XGBoost (ml-xgboost) configuration stored. Model to be trained/loaded separately.');
   }
 
   async loadReinforcementLearningModel() {
@@ -558,7 +496,7 @@ class MLModelManager {
   }
 
   async predictEnsemble(modelInfo, features) {
-    // Random Forest predictions
+    // Random Forest predictions (original logic for random-forest-classifier)
     try {
       if (modelInfo.trained && modelInfo.classifier && modelInfo.classifier.predict) {
         // Use the real RandomForest classifier
@@ -569,7 +507,7 @@ class MLModelManager {
           confidence: confidence 
         }
       } else {
-        // Fallback prediction using regressor
+        // Fallback prediction using custom regressor
         const prediction = modelInfo.regressor.predict(features)
         return { 
           direction: prediction > 0.5 ? 1 : 0, 
@@ -583,15 +521,27 @@ class MLModelManager {
   }
 
   async predictBoosting(modelInfo, features) {
-    // XGBoost predictions
-    if (modelInfo.model && modelInfo.model.predict) {
-      const prediction = modelInfo.model.predict(features)
-      return { 
-        direction: prediction,
-        confidence: Math.abs(prediction - 0.5) + 0.5 
+    // XGBoost predictions using ml-xgboost
+    try {
+      // Ensure features is a 2D array for ml-xgboost
+      const featureArray = Array.isArray(features[0]) ? features : [features];
+
+      if (modelInfo.trained && modelInfo.model && typeof modelInfo.model.predict === 'function') {
+        const predictions = modelInfo.model.predict(featureArray);
+        // ml-xgboost predict usually returns probabilities for binary classification
+        const predictionProbability = predictions[0];
+        return {
+          direction: predictionProbability, // This is often a probability for the positive class
+          confidence: Math.abs(predictionProbability - 0.5) + 0.5 // Example: derive confidence
+        };
+      } else {
+        logger.warn('XGBoost model not trained or model.predict is not a function.', { modelName: 'xgboost' });
+        return { direction: 0.5, confidence: 0.5 }; // Fallback (neutral probability)
       }
+    } catch (error) {
+      logger.error('XGBoost prediction error', { error: error.message, modelName: 'xgboost' });
+      return { direction: 0.5, confidence: 0.5 }; // Fallback
     }
-    return { direction: 0, confidence: 0.5 }
   }
 
   async predictRL(modelInfo, state) {
@@ -1500,7 +1450,7 @@ async function processNinjaTraderData(jsonData, socket) {
       break
       
     default:
-      console.log('📥 Received data type:', type)
+      logger.debug('📥 Received unknown data type from NinjaTrader', { type: type, data: jsonData })
   }
 }
 
@@ -1553,20 +1503,32 @@ async function handleStrategyStatus(data) {
     }
     
     // Generate comprehensive ML analysis if we have sufficient data
-    if (data.price && data.rsi && data.ema_alignment_score) {
+    // First, construct the object to be validated and predicted
+    const dataForPrediction = {
+      instrument: data.instrument || 'NQ', // Default instrument
+      price: data.price,
+      rsi: data.rsi,
+      ema_alignment: data.ema_alignment_score, // Map from strategy data field
+      atr: data.atr,
+      adx: data.adx,
+      volume: data.volume,
+      bid: data.bid,
+      ask: data.ask,
+      high: data.high,
+      low: data.low,
+      close: data.close,
+      open: data.open,
+      timestamp: data.timestamp || new Date().toISOString() // Ensure timestamp
+    };
+
+    // Validate the data before attempting prediction
+    const validatedForPrediction = validatePredictionRequest(dataForPrediction);
+
+    // Proceed only if core fields like price are present after validation
+    if (validatedForPrediction && validatedForPrediction.price !== undefined) {
       try {
-        const mlPrediction = await predictionService.generatePrediction({
-          instrument: data.instrument || 'NQ',
-          price: data.price,
-          rsi: data.rsi,
-          ema_alignment: data.ema_alignment_score,
-          atr: data.atr || 1.0,
-          adx: data.adx || 25,
-          volume: data.volume || 1000,
-          bid: data.bid || data.price - 0.25,
-          ask: data.ask || data.price + 0.25,
-          timestamp: new Date()
-        })
+        // Use the validated and potentially sanitized data for prediction
+        const mlPrediction = await predictionService.generatePrediction(validatedForPrediction);
         
         // Merge ML predictions with strategy data
         mlEnhancedData = {

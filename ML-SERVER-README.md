@@ -101,8 +101,8 @@ The ML server requires these specific dependencies:
 {
   "dependencies": {
     "@tensorflow/tfjs-node": "^4.x",
-    "ml-random-forest": "^1.x", 
-    "ml-xgboost": "^1.x",
+    "random-forest-classifier": "^0.6.0",
+    "ml-xgboost": "*",
     "bull": "^4.x",
     "ioredis": "^5.x",
     "pg": "^8.x",
@@ -178,17 +178,20 @@ CREATE TABLE training_data (
 - **Purpose**: Pattern recognition
 - **Input**: 100 timesteps × 20 features
 - **Output**: [trend_strength, reversal_prob, breakout_prob, volatility, confidence]
-- **Architecture**: Multi-head attention with feed-forward network
+- **Architecture**: CNN-based architecture (as a robust alternative, as Multi-head attention was not available in the current TFJS environment)
 
 ### 3. Random Forest
-- **Purpose**: Feature importance and classification
-- **Configuration**: 100 estimators, max_depth=10
-- **Output**: Direction classification with confidence
+- **Purpose**: Feature importance and classification.
+- **Library**: `random-forest-classifier`.
+- **Configuration**: 100 estimators, max_depth=10 (for the classifier).
+- **Output**: Direction classification with simulated confidence. A simple custom regressor object is also present.
 
 ### 4. XGBoost
-- **Purpose**: High-performance gradient boosting
-- **Configuration**: max_depth=6, eta=0.3
-- **Output**: Binary classification with probability
+- **Purpose**: High-performance gradient boosting.
+- **Intended Library**: `ml-xgboost` (configured in `package.json`).
+- **Current Status**: The server uses a custom-implemented `GradientBoostingClassifier` as a fallback. Full integration of a trained `ml-xgboost` model is a future enhancement.
+- **Configuration (for custom fallback)**: nEstimators=50, eta=0.3, max_depth=6.
+- **Output (of custom fallback)**: Binary classification probability.
 
 ### 5. Deep Q-Network (DQN)
 - **Purpose**: Reinforcement learning for trading decisions

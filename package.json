@@ -45,6 +45,7 @@
     "pg": "^8.16.2",
     "postcss": "^8.4.0",
     "random-forest-classifier": "^0.6.0",
+    "ml-xgboost": "*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "recharts": "^2.8.0",
