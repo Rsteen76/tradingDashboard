@@ -125,6 +125,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private bool useMLPredictions = true;
 		private double mlMinConfidence = 0.65; // Minimum ML confidence for trades
 		private double mlMaxConfidence = 0.95; // Maximum confidence for position sizing
+		private DateTime lastStatusUpdateTime = DateTime.MinValue;
+		private TimeSpan statusUpdateInterval = TimeSpan.FromSeconds(10); // Default 10 seconds
 		#endregion
 
 		#region ML Dashboard Methods - Thread Safe & Optimized
@@ -1608,6 +1610,16 @@ namespace NinjaTrader.NinjaScript.Strategies
 			{
 				Print("Error in OnBarUpdate: " + ex.Message);
 			}
+
+			// Periodic strategy status update (bar-based)
+			if (EnableMLDashboard && mlConnected && State == State.Realtime)
+			{
+				if ((DateTime.Now - lastStatusUpdateTime) > statusUpdateInterval)
+				{
+					SendStrategyStatusToML();
+					lastStatusUpdateTime = DateTime.Now;
+				}
+			}
 		}
 
 		protected override void OnMarketData(MarketDataEventArgs marketDataUpdate)
@@ -1654,6 +1666,16 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Don't spam error logs on every tick
 				if (tickCount % 1000 == 0)
 					Print("❌ Tick processing error: " + ex.Message);
+			}
+
+			// Periodic strategy status update (tick-based)
+			if (EnableMLDashboard && mlConnected && State == State.Realtime)
+			{
+				if ((DateTime.Now - lastStatusUpdateTime) > statusUpdateInterval)
+				{
+					SendStrategyStatusToML();
+					lastStatusUpdateTime = DateTime.Now;
+				}
 			}
 		}
 
@@ -2269,6 +2291,15 @@ namespace NinjaTrader.NinjaScript.Strategies
 			get { return mlMinConfidence; } 
 			set { mlMinConfidence = Math.Max(0.5, Math.Min(1.0, value)); } 
 		}
+
+		[NinjaScriptProperty]
+		[Range(1, 300)]
+		[Display(Name="Status Update Interval (sec)", Description="Interval in seconds for sending strategy status to ML Dashboard", Order=22, GroupName="ML Dashboard")]
+		public int StatusUpdateIntervalSeconds
+		{
+			get { return (int)statusUpdateInterval.TotalSeconds; }
+			set { statusUpdateInterval = TimeSpan.FromSeconds(Math.Max(1, Math.Min(300, value))); }
+		}
 		#endregion
 
 		#region POSITION SYNCHRONIZATION AND HISTORICAL TRADES
@@ -2277,6 +2308,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		{
 			try
 			{
+				
 				Print("🔄 SYNCHRONIZING with account position...");
 				Print($"🔄 Strategy State: {State}");
 				Print($"🔄 Account Status: {(Account != null ? "Available" : "NULL")}");

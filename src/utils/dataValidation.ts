@@ -134,12 +134,12 @@ export function validateStrategyData(data: any): StrategyData {
 
   const validated: StrategyData = {
     instrument: validateInstrument(data.instrument),
-    price: validatePrice(data.price),
+    price: validatePrice(data.price || data.current_price),
     signal_strength: clampPercentage(data.signal_strength),
     ml_probability: clampProbability(data.ml_probability),
     rsi: clampRSI(data.rsi),
     ema_alignment: clampPercentage(data.ema_alignment),
-    pnl: validatePnL(data.pnl),
+    pnl: validatePnL(data.pnl || data.unrealized_pnl),
     position: validatePosition(data.position),
     position_size: validatePositionSize(data.position_size),
     timestamp: validateTimestamp(data.timestamp),
