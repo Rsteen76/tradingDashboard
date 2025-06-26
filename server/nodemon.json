@@ -1,0 +1,13 @@
+{
+  "watch": ["src"],
+  "ext": "js,json",
+  "ignore": [
+    "logs/*",
+    "training_data/*",
+    "models/*",
+    "coverage/*",
+    "data/*",
+    "*.log"
+  ],
+  "exec": "node src/server.js"
+} 

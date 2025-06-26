@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import io, { Socket } from 'socket.io-client'
 
 export interface MarketData {
@@ -124,7 +124,7 @@ interface ConnectionState {
 }
 
 // Use the correct port for the ML server
-const SOCKET_URL = 'http://localhost:8080'
+const SOCKET_URL = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3001` : 'http://localhost:3001'
 
 // Validate incoming data against interface
 function validateData<T>(data: any, type: string): data is T {
@@ -278,6 +278,28 @@ export function useSocket() {
         // Broadcast settings to any components that need them
         window.dispatchEvent(new CustomEvent('server-settings-received', { detail: data }))
       })
+
+      // Handle combined strategy data from server
+      socket.on('strategy_data', (data: any) => {
+        if (!isSubscribed) return
+        console.log('Received strategy_data', data)
+        console.log('🔍 riskManagement from strategy_data:', data.riskManagement)
+        console.log('🎯 execThreshold:', data.riskManagement?.execThreshold)
+        
+        // Update strategy data with the combined structure
+        setStrategyData(prev => ({
+          ...prev,
+          ...data, // This includes marketData, riskManagement, etc.
+        }))
+        
+        // Also update market data history if present
+        if (data.marketData) {
+          setMarketDataHistory(prev => {
+            const newHistory = [...prev, data.marketData].slice(-100)
+            return newHistory
+          })
+        }
+      })
     }
 
     // Initial connection
@@ -301,19 +323,68 @@ export function useSocket() {
     }
   }, [])
 
-  const updateServerSettings = (settings: Record<string, any>) => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('update_settings', settings, (response: any) => {
-        resolve(response)
-      })
+  const updateServerSettings = useCallback((settings: any) => {
+    return new Promise((resolve, reject) => {
+      if (socketRef.current) {
+        // Map dashboard settings to server format
+        const serverSettings = {
+          execThreshold: settings.minConfidence || 0.7,
+          autoTradingEnabled: settings.autoTradingEnabled || false
+        }
+        
+        socketRef.current.emit('update_settings', serverSettings, (response: any) => {
+          if (response?.error) {
+            console.error('Failed to update settings:', response.error)
+            reject(new Error(response.error))
+          } else {
+            console.log('Settings updated successfully:', response)
+            resolve(response)
+          }
+        })
+      } else {
+        reject(new Error('Socket not connected'))
+      }
     })
-  }
+  }, [])
+
+  const getCurrentSettings = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      if (socketRef.current) {
+        socketRef.current.emit('get_settings', (response: any) => {
+          if (response?.error) {
+            console.error('Failed to get settings:', response.error)
+            reject(new Error(response.error))
+          } else {
+            console.log('Current settings received:', response)
+            resolve(response)
+          }
+        })
+      } else {
+        reject(new Error('Socket not connected'))
+      }
+    })
+  }, [])
 
   const sendManualTrade = (payload: { command: string; quantity?: number }) => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('manual_trade', payload, (resp: any) => resolve(resp))
+    return new Promise((resolve, reject) => {
+      if (socketRef.current) {
+        socketRef.current.emit('manual_trade', payload, (response: any) => {
+          resolve(response)
+        })
+      } else {
+        reject(new Error('Socket not connected'))
+      }
     })
   }
 
-  return { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, sendManualTrade }
+  return {
+    strategyData,
+    marketDataHistory,
+    tradeHistory,
+    mlPrediction,
+    connectionState,
+    updateServerSettings,
+    getCurrentSettings,
+    sendManualTrade
+  }
 } 

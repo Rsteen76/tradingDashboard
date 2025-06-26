@@ -1,0 +1,7 @@
+{
+  "execThreshold": 0.4,
+  "autoTradingEnabled": true,
+  "minConfidence": 0.42,
+  "strongConfidence": 0.8,
+  "minStrength": 0.2
+}

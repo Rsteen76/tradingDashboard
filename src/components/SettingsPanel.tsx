@@ -11,9 +11,10 @@ interface Settings {
 
 interface SettingsPanelProps {
   onSave: (s: Settings) => void
+  getCurrentSettings: () => Promise<any>
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
+const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave, getCurrentSettings }) => {
   const [settings, setSettings] = useState<Settings>({
     minConfidence: 0.6,
     strongConfidence: 0.8,
@@ -22,25 +23,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
   })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
-  // Listen for server settings on component mount
+  // Load current settings from server on component mount
   useEffect(() => {
-    const handleServerSettings = (event: CustomEvent) => {
-      const serverSettings = event.detail
-      console.log('Settings panel received server settings:', serverSettings)
-      
-      setSettings(prev => ({
-        ...prev,
-        minConfidence: serverSettings.execThreshold || prev.minConfidence,
-        autoTradingEnabled: serverSettings.autoTradingEnabled || prev.autoTradingEnabled
-      }))
+    async function loadSettings() {
+      try {
+        const serverSettings: any = await getCurrentSettings()
+        console.log('Settings panel loaded server settings:', serverSettings)
+        
+        setSettings(prev => ({
+          ...prev,
+          minConfidence: serverSettings.execThreshold || prev.minConfidence,
+          autoTradingEnabled: serverSettings.autoTradingEnabled || prev.autoTradingEnabled
+        }))
+      } catch (error) {
+        console.warn('Failed to load server settings:', error)
+      }
     }
-
-    window.addEventListener('server-settings-received', handleServerSettings as EventListener)
     
-    return () => {
-      window.removeEventListener('server-settings-received', handleServerSettings as EventListener)
-    }
-  }, [])
+    loadSettings()
+  }, [getCurrentSettings])
 
   const update = (key: keyof Settings, value: number) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -107,9 +108,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
           onClick={async () => {
             console.log('Sending settings:', settings)
             try {
-              const resp = await onSave(settings)
+              const resp: any = await onSave(settings)
               console.log('Server response:', resp)
-              const statusMsg = `Server threshold: ${(resp.execThreshold * 100).toFixed(0)}% | Auto Trading: ${resp.autoTradingEnabled ? 'ON' : 'OFF'}`
+              
+              // Handle server response with fallbacks
+              const threshold = resp?.execThreshold || settings.minConfidence || 0.7
+              const autoTrading = resp?.autoTradingEnabled ?? settings.autoTradingEnabled ?? false
+              
+              const statusMsg = `Server threshold: ${(threshold * 100).toFixed(0)}% | Auto Trading: ${autoTrading ? 'ON' : 'OFF'}`
               setToastMessage(statusMsg)
             } catch (error) {
               console.error('Settings save error:', error)

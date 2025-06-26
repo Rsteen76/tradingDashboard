@@ -3,9 +3,71 @@
 import React, { useState } from 'react'
 import { TrendingUp, TrendingDown, Zap, Brain, Target, Shield, Activity, DollarSign, Clock, AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight, Minus, Settings } from 'lucide-react'
 import { useSocket } from '@/hooks/useSocket'
+import SettingsPanel from '@/components/SettingsPanel'
+import Toast from '@/components/Toast'
+
+// Type interfaces for proper TypeScript support
+interface MarketData {
+  price?: number
+  volume?: number
+  rsi?: number
+  atr?: number
+  instrument?: string
+  [key: string]: any
+}
+
+interface StrategyStatus {
+  position?: string
+  position_size?: number
+  unrealized_pnl?: number
+  current_price?: number
+  overall_signal_strength?: number
+  signal_strength?: number
+  signal_probability_long?: number
+  signal_probability_short?: number
+  ml_confidence_level?: number
+  ml_confidence?: number
+  instrument?: string
+  entry_price?: number
+  next_long_entry_level?: number
+  next_short_entry_level?: number
+  rsi_current?: number
+  smart_trailing_active?: boolean
+  current_smart_stop?: number
+  active_trailing_algorithm?: string
+  [key: string]: any
+}
+
+interface RiskManagement {
+  daily_loss?: number
+  max_daily_loss?: number
+  consecutive_losses?: number
+  max_consecutive_losses?: number
+  trading_disabled?: boolean
+  autoTradingEnabled?: boolean
+  execThreshold?: number
+  [key: string]: any
+}
+
+interface TradeReadinessPanelProps {
+  position: string
+  currentPrice: number
+  mlConfidence: number
+  signalStrength: number
+  longProb: number
+  shortProb: number
+  riskManagement: RiskManagement
+  strategyStatus: StrategyStatus
+}
 
 // Inline TradeReadinessPanel component for now to ensure it works
-const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStrength, longProb, shortProb, riskManagement, strategyStatus }) => {
+const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStrength, longProb, shortProb, riskManagement, strategyStatus }: TradeReadinessPanelProps) => {
+  // Get the actual execution threshold (convert from decimal to percentage)
+  const execThreshold = (riskManagement.execThreshold ?? 0.7) * 100
+
+  // Debug log to verify threshold is being passed correctly
+  console.log('TradeReadinessPanel - execThreshold:', execThreshold, 'from riskManagement:', riskManagement.execThreshold)
+
   // TEMPORARILY ALWAYS SHOW - Remove this line to restore normal behavior
   // if (position !== 'Flat') {
   //   return null
@@ -13,7 +75,7 @@ const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStren
 
   const calculateReadinessScore = () => {
     let score = 0
-    if (mlConfidence >= 70) score += 30
+    if (mlConfidence >= execThreshold) score += 30
     else if (mlConfidence >= 50) score += 15
     
     if (signalStrength >= 65) score += 30
@@ -27,7 +89,7 @@ const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStren
     return score
   }
 
-  const getReadinessStatus = (score) => {
+  const getReadinessStatus = (score: number) => {
     if (score >= 80) return { text: 'READY TO TRADE', color: 'text-emerald-400' }
     if (score >= 60) return { text: 'ALMOST READY', color: 'text-blue-400' }
     if (score >= 40) return { text: 'BUILDING SETUP', color: 'text-amber-400' }
@@ -68,19 +130,17 @@ const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStren
           <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50">
             <div className="flex items-center gap-3">
               <div className={`w-3 h-3 rounded-full ${
-                mlConfidence >= 70 ? 'bg-emerald-500' : 
-                mlConfidence >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                mlConfidence >= execThreshold ? 'bg-emerald-500' : 'bg-red-500'
               }`}></div>
               <span className="text-sm text-slate-300">ML Confidence</span>
             </div>
             <div className="text-right">
               <div className={`font-bold ${
-                mlConfidence >= 70 ? 'text-emerald-400' : 
-                mlConfidence >= 50 ? 'text-amber-400' : 'text-red-400'
+                mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-red-400'
               }`}>
                 {mlConfidence.toFixed(0)}%
               </div>
-              <div className="text-xs text-slate-400">Need: 70%+</div>
+              <div className="text-xs text-slate-400">Need: {execThreshold.toFixed(0)}%+</div>
             </div>
           </div>
 
@@ -167,10 +227,10 @@ const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStren
       <div className="mt-6">
         <h4 className="font-semibold text-amber-300 mb-3">Current Blockers</h4>
         <div className="space-y-2">
-          {mlConfidence < 70 && (
+          {mlConfidence < execThreshold && (
             <div className="flex items-center gap-3 p-2 rounded bg-red-500/10 text-red-300 text-sm">
               <AlertTriangle className="w-4 h-4" />
-              ML confidence too low ({mlConfidence.toFixed(0)}% &lt; 70%)
+              ML confidence too low ({mlConfidence.toFixed(0)}% &lt; {execThreshold.toFixed(0)}%)
             </div>
           )}
           {signalStrength < 65 && (
@@ -206,14 +266,34 @@ const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStren
 }
 
 const TradingDashboard = () => {
-  const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, sendManualTrade } = useSocket()
+  const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, getCurrentSettings, sendManualTrade } = useSocket()
   const [selectedTimeframe, setSelectedTimeframe] = useState('1m')
   const [showSettings, setShowSettings] = useState(false)
+  const [tradeToast, setTradeToast] = useState<string | null>(null)
+
+  const executeTrade = async (payload: { command: string; quantity?: number; instrument?: string }) => {
+    // Ensure instrument is included
+    const enrichedPayload = {
+      instrument,
+      quantity: 1,
+      ...payload,
+    }
+    try {
+      const resp = await sendManualTrade(enrichedPayload) as any
+      if (resp?.success) {
+        setTradeToast('Trade command sent')
+      } else {
+        setTradeToast('Trade failed')
+      }
+    } catch (error) {
+      setTradeToast('Trade failed')
+    }
+  }
 
   // Extract data with fallbacks
-  const marketData = strategyData.marketData || {}
-  const strategyStatus = strategyData.strategyStatus || {}
-  const riskManagement = strategyData.riskManagement || {}
+  const marketData: MarketData = strategyData.marketData || {}
+  const strategyStatus: StrategyStatus = strategyData.strategyStatus || {}
+  const riskManagement: RiskManagement = strategyData.riskManagement || {}
   const lastTrade = strategyData.lastTrade || {}
 
   // Derived values with better fallbacks
@@ -234,6 +314,12 @@ const TradingDashboard = () => {
   
   const instrument = marketData.instrument || strategyStatus.instrument || 'ES'
 
+  // Auto trading status - check multiple possible locations
+  const autoTradingEnabled = riskManagement.autoTradingEnabled ?? strategyStatus.autoTradingEnabled ?? true
+
+  // Get the actual execution threshold from server (default to 0.7 if not available)
+  const execThreshold = (riskManagement.execThreshold ?? strategyStatus.execThreshold ?? 0.7) * 100 // Convert to percentage
+
   // Dynamic colors and status
   const getPositionColor = () => {
     if (position.toLowerCase().includes('long')) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
@@ -249,7 +335,7 @@ const TradingDashboard = () => {
     return 'NEUTRAL'
   }
 
-  const formatCurrency = (val) => {
+  const formatCurrency = (val: number) => {
     const formatted = Math.abs(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     return val >= 0 ? `+$${formatted}` : `-$${formatted}`
   }
@@ -401,6 +487,169 @@ const TradingDashboard = () => {
         <div className="grid grid-cols-3 gap-6">
           {/* AI Signal Analysis */}
           <div className="col-span-2 space-y-6 relative z-10">
+            {/* Auto Trading Status Panel */}
+            <div className="p-6 rounded-2xl border border-blue-500/30 backdrop-blur-xl bg-blue-500/5">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                    <Brain className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-blue-400">Auto Trading System</h3>
+                    <p className="text-sm text-blue-300/80">Real-time activation monitoring</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-blue-400">
+                    {mlConfidence.toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-blue-300">Current Confidence</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-4 mb-6">
+                {/* Auto Trading Status */}
+                <div className="p-4 rounded-lg bg-slate-800/50">
+                  <div className="text-sm text-slate-400 mb-2">Auto Trading</div>
+                  <div className={`text-lg font-bold ${
+                    autoTradingEnabled ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {autoTradingEnabled ? 'ENABLED' : 'DISABLED'}
+                  </div>
+                  <div className="text-xs text-slate-400">System Status</div>
+                </div>
+
+                {/* Confidence vs Threshold */}
+                <div className="p-4 rounded-lg bg-slate-800/50">
+                  <div className="text-sm text-slate-400 mb-2">Threshold Check</div>
+                  <div className={`text-lg font-bold ${
+                    mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-orange-400'
+                  }`}>
+                    {mlConfidence.toFixed(0)}% / {execThreshold.toFixed(0)}%
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {mlConfidence >= execThreshold ? 'PASSING' : 'BELOW THRESHOLD'}
+                  </div>
+                </div>
+
+                {/* Signal Direction */}
+                <div className="p-4 rounded-lg bg-slate-800/50">
+                  <div className="text-sm text-slate-400 mb-2">Signal Direction</div>
+                  <div className={`text-lg font-bold ${
+                    Math.max(longProb, shortProb) > 60 ? 
+                      (longProb > shortProb ? 'text-emerald-400' : 'text-red-400') : 
+                      'text-slate-400'
+                  }`}>
+                    {longProb > shortProb && longProb > 60 ? 'LONG' : 
+                     shortProb > longProb && shortProb > 60 ? 'SHORT' : 'NEUTRAL'}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {Math.max(longProb, shortProb).toFixed(0)}% confidence
+                  </div>
+                </div>
+
+                {/* Risk Management */}
+                <div className="p-4 rounded-lg bg-slate-800/50">
+                  <div className="text-sm text-slate-400 mb-2">Risk Status</div>
+                  <div className={`text-lg font-bold ${
+                    !riskManagement.trading_disabled ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {!riskManagement.trading_disabled ? 'CLEAR' : 'BLOCKED'}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {riskManagement.consecutive_losses || 0} losses
+                  </div>
+                </div>
+              </div>
+
+              {/* Auto Trading Conditions */}
+              <div className="space-y-3">
+                <h4 className="font-semibold text-blue-300 mb-3">Activation Requirements</h4>
+                
+                {/* Condition 1: Auto Trading Enabled */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      autoTradingEnabled ? 'bg-emerald-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-sm text-slate-300">Auto Trading Enabled</span>
+                  </div>
+                  <div className={`text-sm font-medium ${
+                    autoTradingEnabled ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {autoTradingEnabled ? '✓ ENABLED' : '✗ DISABLED'}
+                  </div>
+                </div>
+
+                {/* Condition 2: ML Confidence */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      mlConfidence >= execThreshold ? 'bg-emerald-500' : 'bg-orange-500'
+                    }`}></div>
+                    <span className="text-sm text-slate-300">ML Confidence ≥ {execThreshold.toFixed(0)}%</span>
+                  </div>
+                  <div className={`text-sm font-medium ${
+                    mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-orange-400'
+                  }`}>
+                    {mlConfidence.toFixed(1)}% {mlConfidence >= execThreshold ? '✓' : '✗'}
+                  </div>
+                </div>
+
+                {/* Condition 3: Clear Signal Direction */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      Math.max(longProb, shortProb) > 60 ? 'bg-emerald-500' : 'bg-amber-500'
+                    }`}></div>
+                    <span className="text-sm text-slate-300">Clear Direction ≥ 60%</span>
+                  </div>
+                  <div className={`text-sm font-medium ${
+                    Math.max(longProb, shortProb) > 60 ? 'text-emerald-400' : 'text-amber-400'
+                  }`}>
+                    {Math.max(longProb, shortProb).toFixed(1)}% {Math.max(longProb, shortProb) > 60 ? '✓' : '✗'}
+                  </div>
+                </div>
+
+                {/* Condition 4: Risk Management Clear */}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${
+                      !riskManagement.trading_disabled ? 'bg-emerald-500' : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-sm text-slate-300">Risk Management Clear</span>
+                  </div>
+                  <div className={`text-sm font-medium ${
+                    !riskManagement.trading_disabled ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {!riskManagement.trading_disabled ? '✓ CLEAR' : '✗ BLOCKED'}
+                  </div>
+                </div>
+
+                {/* Overall Status */}
+                <div className="mt-4 p-4 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Target className="w-6 h-6 text-blue-400" />
+                      <div>
+                        <div className="font-bold text-blue-400">System Status</div>
+                        <div className="text-sm text-slate-400">Next trade will execute when all conditions are met</div>
+                      </div>
+                    </div>
+                    <div className={`text-2xl font-bold ${
+                      (autoTradingEnabled && mlConfidence >= execThreshold && 
+                       Math.max(longProb, shortProb) > 60 && !riskManagement.trading_disabled) ? 
+                       'text-emerald-400' : 'text-orange-400'
+                    }`}>
+                      {(autoTradingEnabled && mlConfidence >= execThreshold && 
+                        Math.max(longProb, shortProb) > 60 && !riskManagement.trading_disabled) ? 
+                        'READY TO TRADE' : 'WAITING'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Trade Readiness Panel */}
             <TradeReadinessPanel
               position={position}
@@ -658,19 +907,19 @@ const TradingDashboard = () => {
               <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
               <div className="flex-1 flex flex-col space-y-3">
                 <button 
-                  onClick={() => sendManualTrade({ command: 'go_long', quantity: 1 })}
+                  onClick={() => executeTrade({ command: 'go_long', quantity: 1 })}
                   className="flex-1 p-3 bg-emerald-500 hover:bg-emerald-600 rounded-lg font-medium transition-colors"
                 >
                   Execute Long
                 </button>
                 <button 
-                  onClick={() => sendManualTrade({ command: 'go_short', quantity: 1 })}
+                  onClick={() => executeTrade({ command: 'go_short', quantity: 1 })}
                   className="flex-1 p-3 bg-red-500 hover:bg-red-600 rounded-lg font-medium transition-colors"
                 >
                   Execute Short
                 </button>
                 <button 
-                  onClick={() => sendManualTrade({ command: 'close_position' })}
+                  onClick={() => executeTrade({ command: 'close_position' })}
                   className="flex-1 p-3 bg-slate-600 hover:bg-slate-700 rounded-lg font-medium transition-colors"
                 >
                   Close Position
@@ -699,6 +948,15 @@ const TradingDashboard = () => {
           </div>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="fixed top-20 right-6 z-50">
+          <SettingsPanel onSave={updateServerSettings} getCurrentSettings={getCurrentSettings} />
+        </div>
+      )}
+      {tradeToast && (
+        <Toast type="success" message={tradeToast} onClose={() => setTradeToast(null)} />
+      )}
     </div>
   )
 }
