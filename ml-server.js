@@ -81,17 +81,87 @@ const io = socketIo(server, {
   }
 })
 
+// Runtime adjustable settings received from dashboard
+const runtimeSettings = {
+  execThreshold: parseFloat(process.env.EXEC_THRESHOLD || '0.7'),
+  autoTradingEnabled: process.env.AUTO_TRADING_ENABLED === 'true' || false
+}
+
+// Load settings from file on startup
+function loadPersistedSettings() {
+  try {
+    const fs = require('fs')
+    const path = require('path')
+    const settingsPath = path.join(__dirname, 'runtime-settings.json')
+    
+    if (fs.existsSync(settingsPath)) {
+      const persistedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+      runtimeSettings.execThreshold = persistedSettings.execThreshold ?? runtimeSettings.execThreshold
+      runtimeSettings.autoTradingEnabled = persistedSettings.autoTradingEnabled ?? runtimeSettings.autoTradingEnabled
+      logger.info('✅ Loaded persisted settings', runtimeSettings)
+    }
+  } catch (error) {
+    logger.warn('⚠️ Failed to load persisted settings', { error: error.message })
+  }
+}
+
+// Save settings to file
+function persistSettings() {
+  try {
+    const fs = require('fs')
+    const path = require('path')
+    const settingsPath = path.join(__dirname, 'runtime-settings.json')
+    
+    fs.writeFileSync(settingsPath, JSON.stringify(runtimeSettings, null, 2))
+    logger.debug('💾 Settings persisted to file')
+  } catch (error) {
+    logger.warn('⚠️ Failed to persist settings', { error: error.message })
+  }
+}
+
+// Load settings on startup
+loadPersistedSettings()
+
 // Listen for dashboard connections to receive live settings
 io.on('connection', (dashboardSocket) => {
   logger.info('📊 Dashboard connected', { id: dashboardSocket.id })
+
+  // Send current settings when dashboard connects
+  dashboardSocket.emit('current_settings', {
+    execThreshold: runtimeSettings.execThreshold,
+    autoTradingEnabled: runtimeSettings.autoTradingEnabled
+  })
+
+  // Handle request for current settings
+  dashboardSocket.on('get_settings', (ack) => {
+    if (typeof ack === 'function') {
+      ack({
+        success: true,
+        execThreshold: runtimeSettings.execThreshold,
+        autoTradingEnabled: runtimeSettings.autoTradingEnabled
+      })
+    }
+  })
 
   dashboardSocket.on('update_settings', (settings, ack) => {
     if (typeof settings.minConfidence === 'number') {
       runtimeSettings.execThreshold = settings.minConfidence
       logger.info('⚙️ execThreshold updated via dashboard', { execThreshold: runtimeSettings.execThreshold })
     }
+    if (typeof settings.autoTradingEnabled === 'boolean') {
+      runtimeSettings.autoTradingEnabled = settings.autoTradingEnabled
+      logger.info('⚙️ autoTradingEnabled updated via dashboard', { autoTradingEnabled: runtimeSettings.autoTradingEnabled })
+    }
+    
+    // Persist settings after any update
+    persistSettings()
+    
     if (typeof ack === 'function') {
-      ack({ success: true, execThreshold: runtimeSettings.execThreshold })
+      ack({ 
+        success: true, 
+        execThreshold: runtimeSettings.execThreshold,
+        autoTradingEnabled: runtimeSettings.autoTradingEnabled 
+      })
     }
   })
 
@@ -2683,6 +2753,20 @@ async function handleMarketData(data) {
         logger.debug('Redis market data storage failed', { error: error.message })
       }
     }
+
+    // AUTOMATED TRADING: Evaluate trading opportunities on every market update
+    if (ninjaTraderConnection && ninjaTraderConnection.socket && runtimeSettings.autoTradingEnabled) {
+      try {
+        logger.debug('🤖 Evaluating automated trading opportunity', { 
+          instrument: marketData.instrument, 
+          price: marketData.price,
+          autoTradingEnabled: runtimeSettings.autoTradingEnabled 
+        })
+        await evaluateAndSendTradingCommand(marketData, ninjaTraderConnection.socket)
+      } catch (error) {
+        logger.debug('Automated trading evaluation failed', { error: error.message })
+      }
+    }
     
   } catch (error) {
     logger.error('❌ Error handling market data', { error: error.message })
@@ -5211,45 +5295,71 @@ class TrailingAlgorithmSuite {
 // Example: Generate and send trading commands based on ML model output
 async function evaluateAndSendTradingCommand(marketData, socket) {
   try {
+    logger.debug('🤖 Starting automated trading evaluation', { 
+      instrument: marketData.instrument, 
+      price: marketData.price,
+      threshold: runtimeSettings.execThreshold 
+    })
+    
     const prediction = await predictionService.generatePrediction(marketData);
     const threshold = runtimeSettings.execThreshold ?? 0.7
+    
+    logger.debug('🎯 ML Prediction received', { 
+      direction: prediction.direction, 
+      confidence: prediction.confidence, 
+      threshold: threshold,
+      willTrigger: prediction.confidence > threshold
+    })
+    
     let command = null;
     if (prediction.direction === 'LONG' && prediction.confidence > threshold) {
+      const atrDistance = marketData.atr || (marketData.price * 0.001) // 0.1% fallback
       command = {
         type: 'command',
         timestamp: new Date().toISOString(),
-        instrument: marketData.instrument,
+        instrument: marketData.instrument || 'Unknown',
         command: 'go_long',
         quantity: 1,
         price: marketData.price,
-        stop_loss: marketData.price - (marketData.atr || 10),
-        target: marketData.price + (marketData.atr || 10),
+        stop_loss: marketData.price - atrDistance,
+        target: marketData.price + (atrDistance * 2), // 2:1 R/R
         reason: `ML model long (conf ${(prediction.confidence*100).toFixed(1)}% > ${(threshold*100).toFixed(0)}%)`
       };
+      logger.info('🚀 AUTOMATED LONG SIGNAL TRIGGERED', { 
+        confidence: `${(prediction.confidence*100).toFixed(1)}%`,
+        threshold: `${(threshold*100).toFixed(0)}%`,
+        price: marketData.price
+      })
     } else if (prediction.direction === 'SHORT' && prediction.confidence > threshold) {
+      const atrDistance = marketData.atr || (marketData.price * 0.001)
       command = {
         type: 'command',
         timestamp: new Date().toISOString(),
-        instrument: marketData.instrument,
+        instrument: marketData.instrument || 'Unknown',
         command: 'go_short',
         quantity: 1,
         price: marketData.price,
-        stop_loss: marketData.price + (marketData.atr || 10),
-        target: marketData.price - (marketData.atr || 10),
+        stop_loss: marketData.price + atrDistance,
+        target: marketData.price - (atrDistance * 2), // 2:1 R/R
         reason: `ML model short (conf ${(prediction.confidence*100).toFixed(1)}% > ${(threshold*100).toFixed(0)}%)`
       };
-    } else if (prediction.direction === 'NEUTRAL' || prediction.confidence <= threshold) {
-      command = {
-        type: 'command',
-        timestamp: new Date().toISOString(),
-        instrument: marketData.instrument,
-        command: 'close_position',
-        reason: 'ML model neutral or low confidence'
-      };
+      logger.info('🚀 AUTOMATED SHORT SIGNAL TRIGGERED', { 
+        confidence: `${(prediction.confidence*100).toFixed(1)}%`,
+        threshold: `${(threshold*100).toFixed(0)}%`,
+        price: marketData.price
+      })
+    } else {
+      logger.debug('🔍 No automated trade triggered', { 
+        direction: prediction.direction,
+        confidence: `${(prediction.confidence*100).toFixed(1)}%`,
+        threshold: `${(threshold*100).toFixed(0)}%`,
+        reason: prediction.confidence <= threshold ? 'Low confidence' : 'Neutral direction'
+      })
     }
+    
     if (command && socket && socket.write) {
       socket.write(JSON.stringify(command) + '\n');
-      logger.info('📤 Trading command sent to NinjaTrader', command);
+      logger.info('📤 AUTOMATED Trading command sent to NinjaTrader', command);
     }
   } catch (error) {
     logger.error('❌ Error in evaluateAndSendTradingCommand', { error: error.message });
@@ -5298,7 +5408,3 @@ function handleHeartbeat(data, socket) {
 // ... existing code ...
 // [ML SERVER REFACTOR END]
 
-// Runtime adjustable settings received from dashboard
-const runtimeSettings = {
-  execThreshold: parseFloat(process.env.EXEC_THRESHOLD || '0.7')
-}

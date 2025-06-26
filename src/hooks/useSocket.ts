@@ -271,6 +271,13 @@ export function useSocket() {
         console.log('Received ml_prediction', data)
         setMlPrediction(data)
       })
+
+      socket.on('current_settings', (data: any) => {
+        if (!isSubscribed) return
+        console.log('Received current_settings', data)
+        // Broadcast settings to any components that need them
+        window.dispatchEvent(new CustomEvent('server-settings-received', { detail: data }))
+      })
     }
 
     // Initial connection

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
 import Toast from '@/components/Toast'
 
@@ -6,6 +6,7 @@ interface Settings {
   minConfidence: number // 0–1
   strongConfidence: number // 0–1
   minStrength: number // 0–1
+  autoTradingEnabled: boolean
 }
 
 interface SettingsPanelProps {
@@ -16,9 +17,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
   const [settings, setSettings] = useState<Settings>({
     minConfidence: 0.6,
     strongConfidence: 0.8,
-    minStrength: 0.2
+    minStrength: 0.2,
+    autoTradingEnabled: false
   })
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // Listen for server settings on component mount
+  useEffect(() => {
+    const handleServerSettings = (event: CustomEvent) => {
+      const serverSettings = event.detail
+      console.log('Settings panel received server settings:', serverSettings)
+      
+      setSettings(prev => ({
+        ...prev,
+        minConfidence: serverSettings.execThreshold || prev.minConfidence,
+        autoTradingEnabled: serverSettings.autoTradingEnabled || prev.autoTradingEnabled
+      }))
+    }
+
+    window.addEventListener('server-settings-received', handleServerSettings as EventListener)
+    
+    return () => {
+      window.removeEventListener('server-settings-received', handleServerSettings as EventListener)
+    }
+  }, [])
 
   const update = (key: keyof Settings, value: number) => {
     setSettings(prev => ({ ...prev, [key]: value }))
@@ -59,11 +81,40 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onSave }) => {
         {slider('Min Confidence to Act', 'minConfidence', 0.4, 1, 0.01)}
         {slider('Strong Confidence', 'strongConfidence', 0.6, 1, 0.01)}
         {slider('Min Signal Strength', 'minStrength', 0, 1, 0.01)}
+        
+        {/* Automated Trading Toggle */}
+        <div className="space-y-2 pt-2 border-t border-trading-border/30">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-100">Automated Trading</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.autoTradingEnabled}
+                onChange={(e) => setSettings(prev => ({ ...prev, autoTradingEnabled: e.target.checked }))}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+            </label>
+          </div>
+          <p className="text-xs text-trading-gray-400">
+            {settings.autoTradingEnabled ? 
+              'AI will automatically execute trades based on ML signals' : 
+              'Trading commands will be generated but not executed automatically'
+            }
+          </p>
+        </div>
         <button
           onClick={async () => {
-            onSave(settings).then((resp: any) => {
-              setToastMessage(`Server threshold now ${(resp.execThreshold * 100).toFixed(0)}%`)
-            })
+            console.log('Sending settings:', settings)
+            try {
+              const resp = await onSave(settings)
+              console.log('Server response:', resp)
+              const statusMsg = `Server threshold: ${(resp.execThreshold * 100).toFixed(0)}% | Auto Trading: ${resp.autoTradingEnabled ? 'ON' : 'OFF'}`
+              setToastMessage(statusMsg)
+            } catch (error) {
+              console.error('Settings save error:', error)
+              setToastMessage('Failed to save settings')
+            }
           }}
           className="mt-4 w-full bg-blue-600 hover:bg-blue-700 py-2 rounded"
         >
