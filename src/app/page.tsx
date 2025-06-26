@@ -8,6 +8,8 @@ import MLPanel from '@/components/MLPanel'
 import SignalPanel from '@/components/SignalPanel'
 import LearningPanel from '@/components/LearningPanel'
 import UpcomingTradesPanel from '@/components/UpcomingTradesPanel'
+import AIIntelligencePanel from '@/components/AIIntelligencePanel'
+import SmartTrailingPanel from '@/components/SmartTrailingPanel'
 import { TradingErrorBoundary } from '@/components/ErrorBoundary'
 import { validateStrategyData, PerformanceMonitor } from '@/utils/dataValidation'
 
@@ -55,6 +57,20 @@ interface StrategyData {
   ml_mode?: string
   last_ml_update?: string
   data_source?: string
+  
+  // Smart Trailing Status Fields
+  smart_trailing_enabled?: boolean
+  smart_trailing_active?: boolean
+  current_smart_stop?: number
+  active_trailing_algorithm?: string
+  trailing_confidence_threshold?: number
+  trailing_update_interval?: number
+  max_stop_movement_atr?: number
+  
+  // Risk Management Fields
+  trading_disabled?: boolean
+  consecutive_losses?: number
+  daily_loss?: number
 }
 
 interface ConnectionState {
@@ -660,27 +676,49 @@ export default function Dashboard() {
 
         {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column - ML Analysis & Signals */}
+          {/* Left Column - AI Intelligence & Smart Trailing */}
           <div className="lg:col-span-2 space-y-6">
-            {/* ML Intelligence Panel */}
+            {/* AI Intelligence Panel - Primary Focus */}
+            <TradingErrorBoundary componentName="AIIntelligencePanel">
+              <AIIntelligencePanel 
+                data={debouncedData} 
+                isLoading={!connectionStable}
+              />
+            </TradingErrorBoundary>
+
+            {/* Smart Trailing Panel - Show our advanced system */}
+            <TradingErrorBoundary componentName="SmartTrailingPanel">
+              <SmartTrailingPanel 
+                data={{
+                  ...debouncedData,
+                  current_price: debouncedData.price,
+                  entry_price: debouncedData.entry_price,
+                  unrealized_pnl: debouncedData.pnl,
+                  atr: computedValues.atr || 2.5 // Fallback ATR value
+                }} 
+                isLoading={!connectionStable}
+              />
+            </TradingErrorBoundary>
+
+            {/* Traditional ML Panel - Secondary */}
             <TradingErrorBoundary componentName="MLPanel">
               <MLPanel 
                 data={debouncedData} 
                 isLoading={!connectionStable}
               />
             </TradingErrorBoundary>
+          </div>
 
-            {/* Signal Analysis Panel */}
+          {/* Right Column - Position Management & Opportunities */}
+          <div className="space-y-6">
+            {/* Signal Analysis Panel - Focused on actionable signals */}
             <TradingErrorBoundary componentName="SignalPanel">
               <SignalPanel 
                 data={debouncedData} 
                 isLoading={!connectionStable}
               />
             </TradingErrorBoundary>
-          </div>
 
-          {/* Right Column - Trade Opportunities */}
-          <div className="space-y-6">
             {/* ML-Powered Upcoming Trades Panel */}
             <TradingErrorBoundary componentName="UpcomingTradesPanel">
               <UpcomingTradesPanel 

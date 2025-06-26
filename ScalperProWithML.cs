@@ -142,6 +142,15 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private DateTime lastStatusUpdateTime = DateTime.MinValue;
 		private TimeSpan statusUpdateInterval = TimeSpan.FromSeconds(2); // FIXED: More frequent updates (2 seconds instead of 10)
 		
+		// Smart Trailing Variables
+		private bool enableSmartTrailing = true;
+		private DateTime lastTrailingUpdate = DateTime.MinValue;
+		private TimeSpan trailingUpdateInterval = TimeSpan.FromSeconds(15); // Update every 15 seconds
+		private double currentSmartStopPrice = 0.0;
+		private string activeTrailingAlgorithm = "none";
+		private double maxStopMovementATR = 0.5; // Maximum stop movement per update (in ATR)
+		private double minTrailingConfidence = 0.6; // Minimum AI confidence to act on trailing updates
+		
 		// CIRCUIT BREAKERS: Risk management and protection
 		private int consecutiveLosses = 0;
 		private double dailyLoss = 0;
@@ -269,6 +278,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 					{
 						HandleMLCommand(response);
 					}
+					else if (messageType == "smart_trailing_response")
+					{
+						ProcessSmartTrailingResponse(response);
+					}
 				}
 			}
 			catch (Exception ex)
@@ -302,6 +315,28 @@ namespace NinjaTrader.NinjaScript.Strategies
 						double newRisk = ParseDouble(command, "risk_multiplier", 1.0);
 						riskMultiplier = Math.Max(0.5, Math.Min(3.0, newRisk));
 						Print($"📊 ML Command: Risk multiplier adjusted to {riskMultiplier:F2}");
+						break;
+						
+					case "enable_smart_trailing":
+						enableSmartTrailing = true;
+						Print("🤖 ML Command: Smart trailing enabled");
+						break;
+						
+					case "disable_smart_trailing":
+						enableSmartTrailing = false;
+						Print("🛑 ML Command: Smart trailing disabled");
+						break;
+						
+					case "adjust_trailing_confidence":
+						double newConfidence = ParseDouble(command, "confidence", 0.6);
+						minTrailingConfidence = Math.Max(0.3, Math.Min(1.0, newConfidence));
+						Print($"🎯 ML Command: Trailing confidence adjusted to {minTrailingConfidence:P1}");
+						break;
+						
+					case "adjust_trailing_interval":
+						double newInterval = ParseDouble(command, "interval_seconds", 15.0);
+						trailingUpdateInterval = TimeSpan.FromSeconds(Math.Max(5, Math.Min(120, newInterval)));
+						Print($"⏱️ ML Command: Trailing interval adjusted to {newInterval:F0} seconds");
 						break;
 						
 					default:
@@ -678,10 +713,20 @@ namespace NinjaTrader.NinjaScript.Strategies
 					{"stop_level_long", CalculateStopLevel(true)},
 					{"stop_level_short", CalculateStopLevel(false)},
 					
-					// Strategy metrics
-					{"time_since_last_signal", CalculateTimeSinceLastSignal()},
-					{"strategy_uptime", CalculateStrategyUptime()},
-					{"connection_status", "Connected"}
+									// Strategy metrics
+				{"time_since_last_signal", CalculateTimeSinceLastSignal()},
+				{"strategy_uptime", CalculateStrategyUptime()},
+				{"connection_status", "Connected"},
+				
+				// Smart trailing status
+				{"smart_trailing_enabled", enableSmartTrailing},
+				{"smart_trailing_active", Position.MarketPosition != MarketPosition.Flat && enableSmartTrailing},
+				{"current_smart_stop", currentSmartStopPrice},
+				{"active_trailing_algorithm", activeTrailingAlgorithm},
+				{"trailing_confidence_threshold", minTrailingConfidence},
+				{"trailing_update_interval", trailingUpdateInterval.TotalSeconds},
+				{"max_stop_movement_atr", maxStopMovementATR},
+				{"last_trailing_update", (DateTime.Now - lastTrailingUpdate).TotalSeconds}
 				};
 
 				string json = CreateJsonString("strategy_status", instrumentName,
@@ -1805,6 +1850,304 @@ namespace NinjaTrader.NinjaScript.Strategies
 		
 		#endregion
 
+		#region SMART TRAILING METHODS
+		
+		private void UpdateSmartTrailingStop()
+		{
+			try
+			{
+				// Check if smart trailing is enabled and we have a position
+				if (!enableSmartTrailing || Position.MarketPosition == MarketPosition.Flat)
+					return;
+					
+				// Throttle trailing updates
+				if (DateTime.Now - lastTrailingUpdate < trailingUpdateInterval)
+					return;
+					
+				// Only update if we have valid entry data
+				if (entryPrice == 0 || atr?.IsValidDataPoint(0) != true)
+					return;
+					
+				// Request smart trailing calculation from ML server
+				RequestSmartTrailingUpdate();
+				
+				lastTrailingUpdate = DateTime.Now;
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error in smart trailing update: {ex.Message}");
+			}
+		}
+		
+		private void RequestSmartTrailingUpdate()
+		{
+			try
+			{
+				if (!mlConnected)
+				{
+					Print("🤖 Smart trailing: ML server not connected, using fallback");
+					ApplyFallbackTrailingStop();
+					return;
+				}
+				
+				// Calculate current profit percentage
+				double currentPrice = Close[0];
+				double profitPercent = 0.0;
+				
+				if (Position.MarketPosition == MarketPosition.Long && entryPrice > 0)
+				{
+					profitPercent = ((currentPrice - entryPrice) / entryPrice) * 100;
+				}
+				else if (Position.MarketPosition == MarketPosition.Short && entryPrice > 0)
+				{
+					profitPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
+				}
+				
+				// Prepare position data for ML server
+				lock (dictLock)
+				{
+					reusableDataDict.Clear();
+					reusableDataDict["type"] = "smart_trailing_request";
+					reusableDataDict["position"] = new Dictionary<string, object>
+					{
+						["instrument"] = Instrument.FullName,
+						["direction"] = Position.MarketPosition.ToString().ToLower(),
+						["size"] = Math.Abs(Position.Quantity),
+						["entryPrice"] = entryPrice,
+						["currentPrice"] = currentPrice,
+						["profitPercent"] = Math.Round(profitPercent, 2),
+						["currentStopPrice"] = currentSmartStopPrice > 0 ? currentSmartStopPrice : stopLoss,
+						["activeAlgorithm"] = activeTrailingAlgorithm
+					};
+					reusableDataDict["marketData"] = new Dictionary<string, object>
+					{
+						["price"] = currentPrice,
+						["atr"] = atr[0],
+						["rsi"] = rsi[0],
+						["ema5"] = ema5[0],
+						["ema8"] = ema8[0],
+						["ema13"] = ema13[0],
+						["ema21"] = ema21[0],
+						["ema50"] = ema50[0],
+						["adx"] = adx != null ? adx[0] : 25,
+						["volume"] = Volume[0],
+						["timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
+					};
+					
+					string json = CreateOptimizedJsonString("smart_trailing_request", Instrument.FullName,
+						DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+					EnqueueMLMessage(json);
+				}
+				
+				Print($"🤖 Smart trailing request sent: {Position.MarketPosition} position @ {currentPrice:F2}, Profit: {profitPercent:F1}%");
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error requesting smart trailing: {ex.Message}");
+				ApplyFallbackTrailingStop();
+			}
+		}
+		
+		private void ProcessSmartTrailingResponse(Dictionary<string, object> response)
+		{
+			try
+			{
+				if (!response.ContainsKey("trailingStop"))
+				{
+					Print("⚠️ Invalid smart trailing response - missing trailingStop");
+					return;
+				}
+				
+				var trailingStop = response["trailingStop"] as Dictionary<string, object>;
+				if (trailingStop == null)
+				{
+					Print("⚠️ Invalid smart trailing response - trailingStop is null");
+					return;
+				}
+				
+				double newStopPrice = ParseDouble(trailingStop, "stopPrice", 0.0);
+				string algorithm = ParseString(trailingStop, "algorithm", "unknown");
+				double confidence = ParseDouble(trailingStop, "confidence", 0.0);
+				string reasoning = ParseString(trailingStop, "reasoning", "No reasoning provided");
+				
+				// Validate the new stop price
+				if (newStopPrice <= 0)
+				{
+					Print($"⚠️ Invalid stop price from smart trailing: {newStopPrice}");
+					return;
+				}
+				
+				// Check confidence threshold
+				if (confidence < minTrailingConfidence)
+				{
+					Print($"🤖 Smart trailing confidence too low: {confidence:P1} < {minTrailingConfidence:P1}");
+					return;
+				}
+				
+				// Apply smart trailing stop with safety checks
+				ApplySmartTrailingStop(newStopPrice, algorithm, confidence, reasoning);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error processing smart trailing response: {ex.Message}");
+			}
+		}
+		
+		private void ApplySmartTrailingStop(double newStopPrice, string algorithm, double confidence, string reasoning)
+		{
+			try
+			{
+				double currentPrice = Close[0];
+				double currentStop = currentSmartStopPrice > 0 ? currentSmartStopPrice : stopLoss;
+				
+				// Safety checks based on position direction
+				bool isValidMove = false;
+				
+				if (Position.MarketPosition == MarketPosition.Long)
+				{
+					// For long positions, stop can only move up (higher)
+					if (newStopPrice > currentStop && newStopPrice < currentPrice)
+					{
+						// Additional safety: limit movement to max ATR movement
+						double maxAllowedMove = currentStop + (atr[0] * maxStopMovementATR);
+						newStopPrice = Math.Min(newStopPrice, maxAllowedMove);
+						isValidMove = true;
+					}
+				}
+				else if (Position.MarketPosition == MarketPosition.Short)
+				{
+					// For short positions, stop can only move down (lower)
+					if (newStopPrice < currentStop && newStopPrice > currentPrice)
+					{
+						// Additional safety: limit movement to max ATR movement
+						double maxAllowedMove = currentStop - (atr[0] * maxStopMovementATR);
+						newStopPrice = Math.Max(newStopPrice, maxAllowedMove);
+						isValidMove = true;
+					}
+				}
+				
+				if (!isValidMove)
+				{
+					Print($"🤖 Smart trailing rejected: Invalid stop movement. Current: {currentStop:F2}, New: {newStopPrice:F2}, Price: {currentPrice:F2}");
+					return;
+				}
+				
+				// Apply the new trailing stop
+				SetStopLoss(CalculationMode.Price, newStopPrice);
+				
+				// Update tracking variables
+				currentSmartStopPrice = newStopPrice;
+				activeTrailingAlgorithm = algorithm;
+				stopLoss = newStopPrice; // Update our internal tracking
+				
+				// Visual feedback
+				string directionIcon = Position.MarketPosition == MarketPosition.Long ? "🟢↗" : "🔴↘";
+				SafeDrawText($"SmartTrail_{CurrentBar}", 
+					$"{directionIcon} {algorithm.ToUpper()}", 
+					0, 
+					Position.MarketPosition == MarketPosition.Long ? Low[0] - (3 * TickSize) : High[0] + (3 * TickSize),
+					Position.MarketPosition == MarketPosition.Long ? Brushes.LimeGreen : Brushes.Red);
+				
+				// Draw new stop line
+				SafeDrawLine($"SmartStop_{CurrentBar}", 0, newStopPrice, 5, newStopPrice, Brushes.Orange);
+				
+				Print($"🤖 SMART TRAILING APPLIED:");
+				Print($"   Algorithm: {algorithm} | Confidence: {confidence:P1}");
+				Print($"   Stop moved: {currentStop:F2} → {newStopPrice:F2}");
+				Print($"   Reasoning: {reasoning}");
+				
+				// Send update to ML Dashboard
+				if (EnableMLDashboard && mlConnected)
+				{
+					SendSmartTrailingUpdateToML(newStopPrice, algorithm, confidence, reasoning);
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error applying smart trailing stop: {ex.Message}");
+			}
+		}
+		
+		private void ApplyFallbackTrailingStop()
+		{
+			try
+			{
+				if (Position.MarketPosition == MarketPosition.Flat || atr?.IsValidDataPoint(0) != true)
+					return;
+					
+				double currentPrice = Close[0];
+				double atrValue = atr[0];
+				double fallbackMultiplier = 1.5; // Conservative ATR multiplier
+				
+				double newStopPrice = 0.0;
+				
+				if (Position.MarketPosition == MarketPosition.Long)
+				{
+					newStopPrice = currentPrice - (atrValue * fallbackMultiplier);
+					if (newStopPrice > stopLoss) // Only move stop up for long positions
+					{
+						SetStopLoss(CalculationMode.Price, newStopPrice);
+						currentSmartStopPrice = newStopPrice;
+						stopLoss = newStopPrice;
+						activeTrailingAlgorithm = "fallback_atr";
+						Print($"🔄 Fallback trailing applied (LONG): Stop moved to {newStopPrice:F2}");
+					}
+				}
+				else if (Position.MarketPosition == MarketPosition.Short)
+				{
+					newStopPrice = currentPrice + (atrValue * fallbackMultiplier);
+					if (newStopPrice < stopLoss) // Only move stop down for short positions
+					{
+						SetStopLoss(CalculationMode.Price, newStopPrice);
+						currentSmartStopPrice = newStopPrice;
+						stopLoss = newStopPrice;
+						activeTrailingAlgorithm = "fallback_atr";
+						Print($"🔄 Fallback trailing applied (SHORT): Stop moved to {newStopPrice:F2}");
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error applying fallback trailing stop: {ex.Message}");
+			}
+		}
+		
+		private void SendSmartTrailingUpdateToML(double newStopPrice, string algorithm, double confidence, string reasoning)
+		{
+			try
+			{
+				lock (dictLock)
+				{
+					reusableDataDict.Clear();
+					reusableDataDict["newStopPrice"] = newStopPrice;
+					reusableDataDict["algorithm"] = algorithm;
+					reusableDataDict["confidence"] = confidence;
+					reusableDataDict["reasoning"] = reasoning;
+					reusableDataDict["position"] = Position.MarketPosition.ToString();
+					reusableDataDict["currentPrice"] = Close[0];
+					reusableDataDict["previousStop"] = stopLoss;
+					reusableDataDict["entryPrice"] = entryPrice;
+					
+					string json = CreateOptimizedJsonString("smart_trailing_update", Instrument.FullName,
+						DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+					EnqueueMLMessage(json);
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error sending smart trailing update to ML: {ex.Message}");
+			}
+		}
+		
+		private void ResetSmartTrailingVariables()
+		{
+			currentSmartStopPrice = 0.0;
+			activeTrailingAlgorithm = "none";
+			lastTrailingUpdate = DateTime.MinValue;
+		}
+		
+		#endregion
+
 		protected override void OnStateChange()
 		{
 			if (State == State.SetDefaults)
@@ -1977,6 +2320,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 				
 				// Update ML predictions every bar
 				UpdateMLPredictions();
+				
+				// Update smart trailing stops for active positions
+				UpdateSmartTrailingStop();
 			}
 
 			// Display mode and status
@@ -2871,6 +3217,42 @@ namespace NinjaTrader.NinjaScript.Strategies
 			get { return (int)statusUpdateInterval.TotalSeconds; }
 			set { statusUpdateInterval = TimeSpan.FromSeconds(Math.Max(1, Math.Min(60, value))); } // FIXED: Max 60 seconds instead of 300
 		}
+		
+		// Smart Trailing Parameters
+		[NinjaScriptProperty]
+		[Display(Name="Enable Smart Trailing", Description="Enable AI-powered smart trailing stops", Order=23, GroupName="Smart Trailing")]
+		public bool EnableSmartTrailing 
+		{ 
+			get { return enableSmartTrailing; } 
+			set { enableSmartTrailing = value; } 
+		}
+
+		[NinjaScriptProperty]
+		[Range(0.1, 2.0)]
+		[Display(Name="Max Stop Movement (ATR)", Description="Maximum stop movement per update in ATR multiples", Order=24, GroupName="Smart Trailing")]
+		public double MaxStopMovementATR 
+		{ 
+			get { return maxStopMovementATR; } 
+			set { maxStopMovementATR = Math.Max(0.1, Math.Min(2.0, value)); } 
+		}
+
+		[NinjaScriptProperty]
+		[Range(0.3, 1.0)]
+		[Display(Name="Min Trailing Confidence", Description="Minimum AI confidence required for trailing updates", Order=25, GroupName="Smart Trailing")]
+		public double MinTrailingConfidence 
+		{ 
+			get { return minTrailingConfidence; } 
+			set { minTrailingConfidence = Math.Max(0.3, Math.Min(1.0, value)); } 
+		}
+
+		[NinjaScriptProperty]
+		[Range(5, 120)]
+		[Display(Name="Trailing Update Interval (sec)", Description="Interval between trailing stop updates", Order=26, GroupName="Smart Trailing")]
+		public int TrailingUpdateIntervalSeconds
+		{
+			get { return (int)trailingUpdateInterval.TotalSeconds; }
+			set { trailingUpdateInterval = TimeSpan.FromSeconds(Math.Max(5, Math.Min(120, value))); }
+		}
 		#endregion
 
 		#region POSITION SYNCHRONIZATION AND HISTORICAL TRADES
@@ -2952,6 +3334,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 			lastEntryTime = DateTime.MinValue;
 			lastTradeDirection = "";
 			lastTradeType = "";
+			
+			// Reset smart trailing variables
+			ResetSmartTrailingVariables();
 			
 			Print("🔄 All position variables reset to FLAT state");
 		}
