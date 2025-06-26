@@ -24,6 +24,7 @@ using NinjaTrader.NinjaScript.Indicators;
 using System.Net.Sockets;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Web.Script.Serialization;
 
 //This namespace holds Strategies in this folder and is required. Do not change it.
 namespace NinjaTrader.NinjaScript.Strategies
@@ -78,6 +79,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private readonly ConcurrentQueue<string> mlMessageQueue = new ConcurrentQueue<string>();
 		private CancellationTokenSource cancellationTokenSource;
 		private Task mlSenderTask;
+		private Task mlResponseTask;
 		private int lastReconnectAttempt = 0;
 		private const int ReconnectIntervalMs = 5000;
 		
@@ -93,17 +95,23 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private int indicatorUpdateIntervalMs = 1000;  // 1 second between indicator updates
 		private int tickCount = 0;
 		private int lastTickSendMS = 0;
-		private int lastMLUpdateMS = 0;
-		private const int MLUpdateThrottleMs = 50; // Throttle ML updates to 20Hz max
+		// FIXED: Separate throttling timestamps for different data types
+		private int lastMarketDataMS = 0;
+		private int lastSignalMS = 0;
+		private int lastStatusMS = 0;
+		private const int MarketDataThrottleMs = 100; // Market data every 100ms (10Hz)
+		private const int SignalThrottleMs = 10; // Signals immediately (no throttling)
+		private const int StatusThrottleMs = 1000; // Status every 1 second instead of 10
 		
 		// Memory leak prevention - Drawing object management
 		private readonly Queue<string> drawingObjectTags = new Queue<string>();
 		private const int MaxDrawingObjects = 100;
 		private int drawingObjectCounter = 0;
 		
-		// Reusable objects to reduce GC pressure
+		// Reusable objects to reduce GC pressure - THREAD SAFE
 		private readonly StringBuilder jsonBuilder = new StringBuilder(1024);
 		private readonly Dictionary<string, object> reusableDataDict = new Dictionary<string, object>();
+		private readonly object dictLock = new object(); // CRITICAL FIX: Thread safety for shared dictionary
 		
 		// Enhanced signal filtering
 		private double minSignalStrength = 60.0;
@@ -114,6 +122,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 		// Position synchronization tracking
 		private DateTime lastPositionSyncCheck = DateTime.MinValue;
 		private TimeSpan positionSyncInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
+		
+		// PERFORMANCE: Tick aggregation to reduce processing load
+		private readonly List<double> tickPrices = new List<double>();
+		private readonly List<long> tickVolumes = new List<long>();
+		private DateTime lastTickProcessTime = DateTime.MinValue;
+		private const int TickAggregationMs = 100; // Process aggregated ticks every 100ms
 		
 		// ML Prediction Variables
 		private double mlLongProbability = 0.0;
@@ -126,7 +140,17 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private double mlMinConfidence = 0.65; // Minimum ML confidence for trades
 		private double mlMaxConfidence = 0.95; // Maximum confidence for position sizing
 		private DateTime lastStatusUpdateTime = DateTime.MinValue;
-		private TimeSpan statusUpdateInterval = TimeSpan.FromSeconds(10); // Default 10 seconds
+		private TimeSpan statusUpdateInterval = TimeSpan.FromSeconds(2); // FIXED: More frequent updates (2 seconds instead of 10)
+		
+		// CIRCUIT BREAKERS: Risk management and protection
+		private int consecutiveLosses = 0;
+		private double dailyLoss = 0;
+		private double sessionStartingBalance = 0;
+		private const double MaxDailyLoss = 1000; // $1000 max daily loss
+		private const int MaxConsecutiveLosses = 3;
+		private bool tradingDisabled = false;
+		private DateTime lastTradingResetCheck = DateTime.MinValue;
+		private readonly HashSet<string> pendingOrders = new HashSet<string>(); // Order state tracking
 		#endregion
 
 		#region ML Dashboard Methods - Thread Safe & Optimized
@@ -172,6 +196,159 @@ namespace NinjaTrader.NinjaScript.Strategies
 				cancellationTokenSource.Token, 
 				TaskCreationOptions.LongRunning, 
 				TaskScheduler.Default);
+		}
+		
+		private async Task StartMLResponseReader()
+		{
+			await Task.Run(async () =>
+			{
+				byte[] buffer = new byte[4096];
+				string incomplete = "";
+				
+				while (mlConnected && stream != null)
+				{
+					try
+					{
+						int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+						if (bytesRead > 0)
+						{
+							string data = incomplete + Encoding.UTF8.GetString(buffer, 0, bytesRead);
+							string[] lines = data.Split('\n');
+							
+							// Process complete lines
+							for (int i = 0; i < lines.Length - 1; i++)
+							{
+								if (!string.IsNullOrWhiteSpace(lines[i]))
+								{
+									ProcessMLResponse(lines[i].Trim());
+								}
+							}
+							
+							// Save incomplete line for next iteration
+							incomplete = lines[lines.Length - 1];
+						}
+					}
+					catch (Exception ex)
+					{
+						Print($"Error reading ML responses: {ex.Message}");
+						mlConnected = false;
+						break;
+					}
+				}
+			});
+		}
+
+		private void ProcessMLResponse(string jsonResponse)
+		{
+			try
+			{
+				var serializer = new JavaScriptSerializer();
+				var response = serializer.DeserializeObject(jsonResponse) as Dictionary<string, object>;
+				
+				if (response != null && response.ContainsKey("type"))
+				{
+					string messageType = response["type"].ToString();
+					
+					if (messageType == "ml_prediction_response" && response.ContainsKey("prediction"))
+					{
+						var prediction = response["prediction"] as Dictionary<string, object>;
+						if (prediction != null)
+						{
+							// Update ML variables with safe parsing
+							mlLongProbability = ParseDouble(prediction, "longProbability", 0.5);
+							mlShortProbability = ParseDouble(prediction, "shortProbability", 0.5);
+							mlConfidenceLevel = ParseDouble(prediction, "confidence", 0.5);
+							mlMarketRegime = ParseString(prediction, "marketRegime", "Unknown");
+							mlVolatilityPrediction = ParseDouble(prediction, "volatility", 1.0);
+							lastMLPredictionTime = DateTime.Now;
+							
+							Print($"📊 ML Response: Long={mlLongProbability:P}, Short={mlShortProbability:P}, Confidence={mlConfidenceLevel:P}");
+						}
+					}
+					else if (messageType == "command")
+					{
+						HandleMLCommand(response);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"Error processing ML response: {ex.Message}");
+			}
+		}
+
+		private void HandleMLCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				if (!command.ContainsKey("command"))
+					return;
+					
+				string cmd = command["command"].ToString();
+				
+				switch (cmd)
+				{
+					case "disable_trading":
+						tradingDisabled = true;
+						Print("🛑 ML Command: Trading disabled");
+						break;
+						
+					case "enable_trading":
+						tradingDisabled = false;
+						Print("✅ ML Command: Trading enabled");
+						break;
+						
+					case "adjust_risk":
+						double newRisk = ParseDouble(command, "risk_multiplier", 1.0);
+						riskMultiplier = Math.Max(0.5, Math.Min(3.0, newRisk));
+						Print($"📊 ML Command: Risk multiplier adjusted to {riskMultiplier:F2}");
+						break;
+						
+					default:
+						Print($"❓ Unknown ML command: {cmd}");
+						break;
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"Error handling ML command: {ex.Message}");
+			}
+		}
+		
+		// Helper methods for safe JSON parsing
+		private double ParseDouble(Dictionary<string, object> dict, string key, double defaultValue)
+		{
+			try
+			{
+				if (dict.ContainsKey(key) && dict[key] != null)
+				{
+					if (dict[key] is double)
+						return (double)dict[key];
+					if (double.TryParse(dict[key].ToString(), out double result))
+						return result;
+				}
+				return defaultValue;
+			}
+			catch
+			{
+				return defaultValue;
+			}
+		}
+		
+		private string ParseString(Dictionary<string, object> dict, string key, string defaultValue)
+		{
+			try
+			{
+				if (dict.ContainsKey(key) && dict[key] != null)
+				{
+					return dict[key].ToString();
+				}
+				return defaultValue;
+			}
+			catch
+			{
+				return defaultValue;
+			}
 		}
 		
 		private async Task ProcessMLMessageQueue()
@@ -302,35 +479,70 @@ namespace NinjaTrader.NinjaScript.Strategies
 		{
 			// Throttle ML updates to prevent spam
 			int currentTime = Environment.TickCount;
-			if (currentTime - lastMLUpdateMS < MLUpdateThrottleMs)
+			if (currentTime - lastSignalMS < SignalThrottleMs)
 				return;
-			lastMLUpdateMS = currentTime;
+			lastSignalMS = currentTime;
 
-			reusableDataDict.Clear();
+			// THREAD SAFETY FIX: Lock shared dictionary
+			lock (dictLock)
+			{
+				reusableDataDict.Clear();
 			reusableDataDict["direction"] = direction;
 			reusableDataDict["price"] = Close[0];
-			reusableDataDict["signal_type"] = signalType;
-			reusableDataDict["executed"] = executed;
-			reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
-			reusableDataDict["rsi"] = Math.Round(rsi[0], 2);
-			reusableDataDict["atr"] = Math.Round(atr[0], 4);
-			reusableDataDict["adx"] = 0;
-			reusableDataDict["volume_ratio"] = Math.Round(Volume[0] / ((Volume[0] + Volume[1]) / 2.0), 2);
-			reusableDataDict["ema_alignment"] = Math.Round(GetEMAAlignment(), 1);
-			reusableDataDict["signal_strength"] = Math.Round(CalculateSignalStrength(), 1);
-			reusableDataDict["ml_probability"] = 0.0;
-
-			if (!string.IsNullOrEmpty(blockReason))
+			
+			if (signalType == "Standard")
+			{
+				reusableDataDict["signal_type"] = "Standard";
+				reusableDataDict["executed"] = executed;
+				reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
+				reusableDataDict["rsi"] = Math.Round(rsi[0], 2);
+				reusableDataDict["atr"] = Math.Round(atr[0], 4);
+				reusableDataDict["adx"] = 0;
+				reusableDataDict["volume_ratio"] = Math.Round(Volume[0] / ((Volume[0] + Volume[1]) / 2.0), 2);
+				reusableDataDict["ema_alignment"] = Math.Round(GetEMAAlignment(), 1);
+				reusableDataDict["signal_strength"] = Math.Round(CalculateSignalStrength(), 1);
+				reusableDataDict["ml_probability"] = 0.0;
+			}
+			else if (signalType == "ML_Blocked")
+			{
+				reusableDataDict["signal_type"] = "ML_Blocked";
+				reusableDataDict["executed"] = false;
+				reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
+				reusableDataDict["rsi"] = Math.Round(rsi[0], 2);
+				reusableDataDict["atr"] = Math.Round(atr[0], 4);
+				reusableDataDict["adx"] = 0;
+				reusableDataDict["volume_ratio"] = Math.Round(Volume[0] / ((Volume[0] + Volume[1]) / 2.0), 2);
+				reusableDataDict["ema_alignment"] = Math.Round(GetEMAAlignment(), 1);
+				reusableDataDict["signal_strength"] = Math.Round(CalculateSignalStrength(), 1);
+				reusableDataDict["ml_probability"] = 0.0;
 				reusableDataDict["block_reason"] = blockReason;
+			}
+			else if (signalType == "ML_Confirmed")
+			{
+				reusableDataDict["signal_type"] = "ML_Confirmed";
+				reusableDataDict["executed"] = true;
+				reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
+				reusableDataDict["rsi"] = Math.Round(rsi[0], 2);
+				reusableDataDict["atr"] = Math.Round(atr[0], 4);
+				reusableDataDict["adx"] = 0;
+				reusableDataDict["volume_ratio"] = Math.Round(Volume[0] / ((Volume[0] + Volume[1]) / 2.0), 2);
+				reusableDataDict["ema_alignment"] = Math.Round(GetEMAAlignment(), 1);
+				reusableDataDict["signal_strength"] = Math.Round(CalculateSignalStrength(), 1);
+				reusableDataDict["ml_probability"] = 0.0;
+			}
 
-			string json = CreateOptimizedJsonString("signal", Instrument.FullName, 
-				DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
-			EnqueueMLMessage(json);
+				string json = CreateOptimizedJsonString("signal", Instrument.FullName, 
+					DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+				EnqueueMLMessage(json);
+			} // End lock
 		}
 
 		private void SendTradeToML(string direction, double entryPrice, double exitPrice, double pnl, string exitReason = "Target/Stop")
 		{
-			reusableDataDict.Clear();
+			// THREAD SAFETY FIX: Lock shared dictionary
+			lock (dictLock)
+			{
+				reusableDataDict.Clear();
 			reusableDataDict["direction"] = direction;
 			reusableDataDict["entry_price"] = entryPrice;
 			reusableDataDict["exit_price"] = exitPrice;
@@ -352,9 +564,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 			reusableDataDict["actual_rr"] = Math.Round(Math.Abs(pnl / (entryPrice - stopLoss)), 2);
 			reusableDataDict["trade_type"] = lastTradeType;
 
-			string json = CreateOptimizedJsonString("trade", Instrument.FullName, 
-				DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
-			EnqueueMLMessage(json);
+				string json = CreateOptimizedJsonString("trade", Instrument.FullName, 
+					DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+				EnqueueMLMessage(json);
+			} // End lock
 		}
 
 		private void SendMarketDataToML()
@@ -363,11 +576,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 			{
 				// Throttle market data updates
 				int currentTime = Environment.TickCount;
-				if (currentTime - lastMLUpdateMS < MLUpdateThrottleMs)
+				if (currentTime - lastMarketDataMS < MarketDataThrottleMs)
 					return;
-				lastMLUpdateMS = currentTime;
+				lastMarketDataMS = currentTime;
 
-				reusableDataDict.Clear();
+				// THREAD SAFETY FIX: Lock shared dictionary
+				lock (dictLock)
+				{
+					reusableDataDict.Clear();
 				reusableDataDict["price"] = Close[0];
 				reusableDataDict["ema5"] = ema5[0];
 				reusableDataDict["ema8"] = ema8[0];
@@ -381,9 +597,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 				reusableDataDict["volume_ratio"] = CalculateVolumeRatio();
 				reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
 
-				string json = CreateOptimizedJsonString("market_data", Instrument.FullName,
-					DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), reusableDataDict);
-				EnqueueMLMessage(json);
+					string json = CreateOptimizedJsonString("market_data", Instrument.FullName,
+						DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), reusableDataDict);
+					EnqueueMLMessage(json);
+				} // End lock
 			}
 			catch (Exception ex)
 			{
@@ -394,7 +611,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private void SendStrategyStatusToML()
 		{
 			try
-			{				// Calculate comprehensive strategy status metrics with multi-instrument support
+			{
+				// FIXED: Add throttling for strategy status to prevent spam but allow more frequent updates
+				int currentTime = Environment.TickCount;
+				if (currentTime - lastStatusMS < StatusThrottleMs)
+					return;
+				lastStatusMS = currentTime;
+				
+				// Calculate comprehensive strategy status metrics with multi-instrument support
 				var statusData = new Dictionary<string, object>
 				{
 					{"strategy_instance_id", strategyInstanceId},
@@ -1035,6 +1259,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 			try
 			{
+				// FIXED: Separate throttling for optimized status updates
+				int currentTime = Environment.TickCount;
+				if (currentTime - lastStatusMS < StatusThrottleMs)
+					return;
+				lastStatusMS = currentTime;
+				
 				// Enhanced strategy status with tick data metrics
 				var statusJson = new StringBuilder();
 				statusJson.Append("{");
@@ -1067,20 +1297,300 @@ namespace NinjaTrader.NinjaScript.Strategies
 			}
 		}
 
+		// PERFORMANCE: Process aggregated tick data
+		private void ProcessAggregatedTicks()
+		{
+			try
+			{
+				if (tickPrices.Count == 0)
+					return;
+				
+				// Calculate aggregated metrics
+				double avgPrice = tickPrices.Average();
+				double minPrice = tickPrices.Min();
+				double maxPrice = tickPrices.Max();
+				long totalVolume = tickVolumes.Sum();
+				
+				// Send aggregated tick data to ML Dashboard (if enabled)
+				if (EnableMLDashboard && mlConnected)
+				{
+					lock (dictLock)
+					{
+						reusableDataDict.Clear();
+						reusableDataDict["type"] = "aggregated_tick_data";
+						reusableDataDict["avg_price"] = Math.Round(avgPrice, 4);
+						reusableDataDict["min_price"] = Math.Round(minPrice, 4);
+						reusableDataDict["max_price"] = Math.Round(maxPrice, 4);
+						reusableDataDict["total_volume"] = totalVolume;
+						reusableDataDict["tick_count"] = tickPrices.Count;
+						reusableDataDict["time_window_ms"] = TickAggregationMs;
+						
+						string json = CreateOptimizedJsonString("tick_aggregate", Instrument.FullName,
+							DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), reusableDataDict);
+						EnqueueMLMessage(json);
+					}
+				}
+				
+				// Log performance metrics periodically
+				if (tickCount % 1000 == 0)
+				{
+					Print($"📊 TICK PERFORMANCE: Processed {tickPrices.Count} ticks in {TickAggregationMs}ms window, Avg: {avgPrice:F2}, Range: {maxPrice - minPrice:F4}");
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"Error processing aggregated ticks: {ex.Message}");
+			}
+		}
+
+		// CONFIGURATION: Validate user parameters to prevent errors
+		private void ValidateUserParameters()
+		{
+			try
+			{
+				bool hasErrors = false;
+				
+				// Risk validation - Critical safety check
+				if (RiskPerTrade > 0.05) // 5% max
+				{
+					Print("⚠️ WARNING: Risk per trade exceeds 5% - capping at 5% for safety");
+					RiskPerTrade = 0.05;
+				}
+				
+				if (RiskPerTrade <= 0)
+				{
+					Print("❌ ERROR: Risk per trade must be positive - setting to 1%");
+					RiskPerTrade = 0.01;
+					hasErrors = true;
+				}
+				
+				// Signal strength validation
+				if (MinSignalStrength < 0 || MinSignalStrength > 100)
+				{
+					Print("❌ ERROR: MinSignalStrength must be between 0-100 - setting to 60");
+					MinSignalStrength = 60;
+					hasErrors = true;
+				}
+				
+				// Order quantity validation
+				if (OrderQuantity <= 0)
+				{
+					Print("❌ ERROR: OrderQuantity must be positive - setting to 1");
+					OrderQuantity = 1;
+					hasErrors = true;
+				}
+				
+				// ATR multiplier validation
+				if (ATRMultiplier <= 0 || ATRMultiplier > 5.0)
+				{
+					Print("❌ ERROR: ATRMultiplier must be between 0-5 - setting to 1.5");
+					ATRMultiplier = 1.5;
+					hasErrors = true;
+				}
+				
+				// Risk/Reward validation
+				if (RiskRewardRatio < 1.0 || RiskRewardRatio > 10.0)
+				{
+					Print("❌ ERROR: RiskRewardRatio must be between 1-10 - setting to 2.0");
+					RiskRewardRatio = 2.0;
+					hasErrors = true;
+				}
+				
+				// ML confidence validation
+				if (MLMinConfidence < 0.5 || MLMinConfidence > 1.0)
+				{
+					Print("❌ ERROR: MLMinConfidence must be between 0.5-1.0 - setting to 0.65");
+					MLMinConfidence = 0.65;
+					hasErrors = true;
+				}
+				
+				// Status update interval validation
+				if (StatusUpdateIntervalSeconds < 1 || StatusUpdateIntervalSeconds > 60)
+				{
+					Print("❌ ERROR: StatusUpdateIntervalSeconds must be between 1-60 - setting to 2");
+					StatusUpdateIntervalSeconds = 2;
+					hasErrors = true;
+				}
+				
+				if (hasErrors)
+				{
+					Print("🛠️ Configuration validation completed with corrections");
+				}
+				else
+				{
+					Print("✅ Configuration validation passed - all parameters valid");
+				}
+				
+				// Log final configuration
+				Print($"📊 FINAL CONFIG: Risk={RiskPerTrade:P2}, OrderQty={OrderQuantity}, ATR={ATRMultiplier}, RR={RiskRewardRatio}, SignalMin={MinSignalStrength}");
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error in parameter validation: {ex.Message}");
+			}
+		}
+
+		// CIRCUIT BREAKERS: Risk management and trading protection
+		private bool CheckCircuitBreakers()
+		{
+			try
+			{
+				// Reset daily tracking at session start
+				if (DateTime.Now.Date > lastTradingResetCheck.Date)
+				{
+					dailyLoss = 0;
+					consecutiveLosses = 0;
+					tradingDisabled = false;
+					sessionStartingBalance = Account?.Get(AccountItem.NetLiquidation, Currency.UsDollar) ?? 0;
+					lastTradingResetCheck = DateTime.Now;
+					Print($"🔄 DAILY RESET: Starting balance ${sessionStartingBalance:F2}");
+				}
+				
+				// Check daily loss limit
+				double currentBalance = Account?.Get(AccountItem.NetLiquidation, Currency.UsDollar) ?? 0;
+				double actualDailyLoss = sessionStartingBalance - currentBalance;
+				
+				if (actualDailyLoss > MaxDailyLoss)
+				{
+					tradingDisabled = true;
+					Print($"🚨 CIRCUIT BREAKER: Daily loss limit exceeded ${actualDailyLoss:F2} > ${MaxDailyLoss:F2}");
+					return false;
+				}
+				
+				// Check consecutive losses
+				if (consecutiveLosses >= MaxConsecutiveLosses)
+				{
+					tradingDisabled = true;
+					Print($"🚨 CIRCUIT BREAKER: {consecutiveLosses} consecutive losses reached limit of {MaxConsecutiveLosses}");
+					return false;
+				}
+				
+				// Check if trading was manually disabled
+				if (tradingDisabled)
+				{
+					Print("⏸️ TRADING DISABLED: Circuit breaker active - no new trades allowed");
+					return false;
+				}
+				
+				return true; // All checks passed
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error in circuit breaker check: {ex.Message}");
+				return false; // Fail safe - block trading on error
+			}
+		}
+		
+		private void RecordTradeResult(double pnl)
+		{
+			try
+			{
+				if (pnl < 0)
+				{
+					consecutiveLosses++;
+					dailyLoss += Math.Abs(pnl);
+					Print($"❌ LOSS RECORDED: ${pnl:F2} | Consecutive: {consecutiveLosses} | Daily Loss: ${dailyLoss:F2}");
+				}
+				else
+				{
+					consecutiveLosses = 0; // Reset on winning trade
+					Print($"✅ WIN RECORDED: ${pnl:F2} | Consecutive losses reset");
+				}
+				
+				// Send circuit breaker status to ML Dashboard
+				if (EnableMLDashboard && mlConnected)
+				{
+					lock (dictLock)
+					{
+						reusableDataDict.Clear();
+						reusableDataDict["consecutive_losses"] = consecutiveLosses;
+						reusableDataDict["daily_loss"] = Math.Round(dailyLoss, 2);
+						reusableDataDict["max_daily_loss"] = MaxDailyLoss;
+						reusableDataDict["max_consecutive_losses"] = MaxConsecutiveLosses;
+						reusableDataDict["trading_disabled"] = tradingDisabled;
+						reusableDataDict["session_starting_balance"] = Math.Round(sessionStartingBalance, 2);
+						
+						string json = CreateOptimizedJsonString("risk_management", Instrument.FullName,
+							DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+						EnqueueMLMessage(json);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error recording trade result: {ex.Message}");
+			}
+		}
+
+		// ERROR RECOVERY: Execute trade operations with retry logic
+		private void ExecuteTradeWithRetry(Action tradeAction, string operationName, int maxRetries = 3)
+		{
+			int attempts = 0;
+			while (attempts < maxRetries)
+			{
+				try
+				{
+					tradeAction();
+					Print($"✅ {operationName} succeeded on attempt {attempts + 1}");
+					return;
+				}
+				catch (Exception ex)
+				{
+					attempts++;
+					Print($"❌ {operationName} attempt {attempts} failed: {ex.Message}");
+					if (attempts >= maxRetries)
+					{
+						Print($"🚨 {operationName} FAILED after {maxRetries} attempts - giving up");
+						// Record critical failure for circuit breaker
+						if (operationName.Contains("Entry"))
+						{
+							RecordTradeResult(-50); // Penalty for failed entries
+						}
+						throw;
+					}
+					Thread.Sleep(100 * attempts); // Exponential backoff
+				}
+			}
+		}
+
+		// DEBUG: Connection status logging method
+		private void LogConnectionStatus()
+		{
+			try
+			{
+				string status = $"🔍 ML CONNECTION DEBUG - Connected: {mlConnected}, " +
+							   $"Queue: {mlMessageQueue.Count} messages, " +
+							   $"TCP: {(tcpClient?.Connected ?? false)}, " +
+							   $"Stream: {(stream?.CanWrite ?? false)}";
+				Print(status);
+			}
+			catch (Exception ex)
+			{
+				Print($"Error in connection status logging: {ex.Message}");
+			}
+		}
+
 		private void DisconnectFromMLDashboard()
 		{
 			try
 			{
 				mlConnected = false;
 				
-				// Cancel and wait for ML sender task
+				// Cancel and wait for ML tasks
 				if (cancellationTokenSource != null)
 				{
 					cancellationTokenSource.Cancel();
+					
+					// Wait for both sender and response tasks
 					if (mlSenderTask != null && !mlSenderTask.IsCompleted)
 					{
 						mlSenderTask.Wait(2000); // Wait up to 2 seconds
 					}
+					if (mlResponseTask != null && !mlResponseTask.IsCompleted)
+					{
+						mlResponseTask.Wait(2000); // Wait up to 2 seconds
+					}
+					
 					cancellationTokenSource.Dispose();
 					cancellationTokenSource = null;
 				}
@@ -1353,6 +1863,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Initialize strategy start time
 				strategyStartTime = DateTime.Now;
 
+				// CONFIGURATION VALIDATION
+				ValidateUserParameters();
+
 				// Add plots for visual display
 				AddPlot(new Stroke(Brushes.LimeGreen, 2), PlotStyle.Line, "EMA5");
 				AddPlot(new Stroke(Brushes.Gold, 2), PlotStyle.Line, "EMA8");
@@ -1395,11 +1908,17 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Synchronize with existing account position on startup
 				SynchronizeWithAccountPosition();
 
-				// Connect to ML Dashboard and start background task
+				// Connect to ML Dashboard and start background tasks
 				if (EnableMLDashboard)
 				{
 					ConnectToMLDashboard();
 					StartMLSenderTask();
+					
+					// Start ML response reader for two-way communication
+					if (mlConnected)
+					{
+						mlResponseTask = StartMLResponseReader();
+					}
 				}
 			}
 			else if (State == State.Historical)
@@ -1619,12 +2138,18 @@ namespace NinjaTrader.NinjaScript.Strategies
 					SendStrategyStatusToML();
 					lastStatusUpdateTime = DateTime.Now;
 				}
+				
+				// DEBUG: Log connection status every 30 bars to help diagnose issues
+				if (CurrentBar % 30 == 0)
+				{
+					LogConnectionStatus();
+				}
 			}
 		}
 
 		protected override void OnMarketData(MarketDataEventArgs marketDataUpdate)
 		{
-			// TICK-BASED ULTRA-RESPONSIVE PROCESSING
+			// OPTIMIZED TICK-BASED PROCESSING WITH AGGREGATION
 			if (State != State.Realtime || CurrentBar < BarsRequiredToTrade)
 				return;
 
@@ -1633,12 +2158,17 @@ namespace NinjaTrader.NinjaScript.Strategies
 				tickCount++;
 				DateTime now = DateTime.Now;
 				
-				// Send ultra-responsive tick data to ML dashboard (throttled for performance)
-				if (EnableMLDashboard && mlConnected && 
-					(now - lastTickUpdate).TotalMilliseconds >= tickUpdateIntervalMs)
+				// PERFORMANCE: Aggregate ticks for processing
+				tickPrices.Add(marketDataUpdate.Price);
+				tickVolumes.Add(marketDataUpdate.Volume);
+				
+				// Process aggregated ticks every 100ms instead of every tick
+				if ((now - lastTickProcessTime).TotalMilliseconds >= TickAggregationMs)
 				{
-					SendTickDataToML(marketDataUpdate);
-					lastTickUpdate = now;
+					ProcessAggregatedTicks();
+					tickPrices.Clear();
+					tickVolumes.Clear();
+					lastTickProcessTime = now;
 				}				// Update real-time display every few ticks for performance
 				if (tickCount % 5 == 0)
 				{
@@ -1687,6 +2217,25 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		private void CheckForLongSignal(bool htfBullish)
 		{
+			// NULL SAFETY: Check all required indicators
+			if (ema5?.IsValidDataPoint(0) != true || ema8?.IsValidDataPoint(0) != true || 
+				ema13?.IsValidDataPoint(0) != true || ema21?.IsValidDataPoint(0) != true || 
+				ema50?.IsValidDataPoint(0) != true || rsi?.IsValidDataPoint(0) != true ||
+				atr?.IsValidDataPoint(0) != true)
+			{
+				return; // Skip if any indicator is not ready
+			}
+			
+			// CIRCUIT BREAKER: Check if trading is allowed
+			if (!CheckCircuitBreakers())
+			{
+				if (EnableMLDashboard && mlConnected)
+				{
+					SendSignalToML("Long", "Standard", false, "Circuit breaker active");
+				}
+				return;
+			}
+			
 			if (!htfBullish) return;
 			
 			// Check signal strength filter first
@@ -1755,6 +2304,25 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		private void CheckForShortSignal(bool htfBullish)
 		{
+			// NULL SAFETY: Check all required indicators
+			if (ema5?.IsValidDataPoint(0) != true || ema8?.IsValidDataPoint(0) != true || 
+				ema13?.IsValidDataPoint(0) != true || ema21?.IsValidDataPoint(0) != true || 
+				ema50?.IsValidDataPoint(0) != true || rsi?.IsValidDataPoint(0) != true ||
+				atr?.IsValidDataPoint(0) != true)
+			{
+				return; // Skip if any indicator is not ready
+			}
+			
+			// CIRCUIT BREAKER: Check if trading is allowed
+			if (!CheckCircuitBreakers())
+			{
+				if (EnableMLDashboard && mlConnected)
+				{
+					SendSignalToML("Short", "Standard", false, "Circuit breaker active");
+				}
+				return;
+			}
+			
 			if (htfBullish && Close[0] > ema21[0]) return;
 			
 			// Check signal strength filter first
@@ -2062,6 +2630,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 						(price - lastEntryPrice) * execution.Quantity :
 						(lastEntryPrice - price) * execution.Quantity;
 					
+					// RECORD TRADE RESULT FOR CIRCUIT BREAKER
+					RecordTradeResult(pnl);
+					
 					// Send trade to ML Dashboard
 					if (EnableMLDashboard && mlConnected)
 					{
@@ -2293,156 +2864,76 @@ namespace NinjaTrader.NinjaScript.Strategies
 		}
 
 		[NinjaScriptProperty]
-		[Range(1, 300)]
+		[Range(1, 60)]
 		[Display(Name="Status Update Interval (sec)", Description="Interval in seconds for sending strategy status to ML Dashboard", Order=22, GroupName="ML Dashboard")]
 		public int StatusUpdateIntervalSeconds
 		{
 			get { return (int)statusUpdateInterval.TotalSeconds; }
-			set { statusUpdateInterval = TimeSpan.FromSeconds(Math.Max(1, Math.Min(300, value))); }
+			set { statusUpdateInterval = TimeSpan.FromSeconds(Math.Max(1, Math.Min(60, value))); } // FIXED: Max 60 seconds instead of 300
 		}
 		#endregion
 
 		#region POSITION SYNCHRONIZATION AND HISTORICAL TRADES
 		
+		// SIMPLIFIED: Single source of truth position synchronization
 		private void SynchronizeWithAccountPosition()
 		{
 			try
 			{
+				Print("🔄 SIMPLIFIED POSITION SYNC...");
 				
-				Print("🔄 SYNCHRONIZING with account position...");
-				Print($"🔄 Strategy State: {State}");
-				Print($"🔄 Account Status: {(Account != null ? "Available" : "NULL")}");
-				Print($"🔄 Position Status: {(Position != null ? "Available" : "NULL")}");
+				// Single source of truth - Account.Positions
+				var accountPos = Account?.Positions?.FirstOrDefault(p => 
+					p.Instrument.FullName == Instrument.FullName);
 				
-				// Get actual account position with enhanced debugging
-				string actualPosition = GetActualPositionStatus();
-				int actualSize = GetActualPositionSize();
-				double actualUnrealizedPnL = GetActualUnrealizedPnL();
-				
-				Print($"📊 Account Position Status: {actualPosition}");
-				Print($"📊 Account Position Size: {actualSize}");
-				Print($"📊 Account Unrealized P&L: ${actualUnrealizedPnL:F2}");
-				
-				// Enhanced position detection for existing positions
-				if (actualPosition != "Flat" && actualSize > 0)
+				if (accountPos == null || accountPos.Quantity == 0)
 				{
-					Print($"🔍 FOUND EXISTING POSITION: {actualPosition} {actualSize}");
-					
-					if (entryPrice == 0 || lastEntryPrice == 0)
+					// Flat position
+					if (entryPrice != 0)
 					{
-						Print("⚠️ DETECTED EXISTING POSITION - Strategy variables not synchronized!");
-						
-						// Try multiple approaches to get position data
-						double positionPrice = 0;
-						MarketPosition positionDirection = MarketPosition.Flat;
-						
-						// Method 1: Account positions
-						if (Account != null && Account.Positions != null)
-						{
-							var accountPosition = Account.Positions.FirstOrDefault(p => 
-								p.Instrument.FullName == Instrument.FullName) ??
-								Account.Positions.FirstOrDefault(p => 
-								p.Instrument.MasterInstrument.Name == Instrument.MasterInstrument.Name) ??
-								Account.Positions.FirstOrDefault(p => 
-								p.Instrument.MasterInstrument.Name.Contains(Instrument.MasterInstrument.Name.Substring(0, Math.Min(3, Instrument.MasterInstrument.Name.Length))));
-							
-							if (accountPosition != null)
-							{
-								positionPrice = accountPosition.AveragePrice;
-								positionDirection = accountPosition.MarketPosition;
-								Print($"📍 Found account position: {positionDirection} @ {positionPrice:F2}");
-							}
-						}
-						
-						// Method 2: Fallback to strategy position
-						if (positionPrice == 0 && Position != null && Position.MarketPosition != MarketPosition.Flat)
-						{
-							positionPrice = Position.AveragePrice;
-							positionDirection = Position.MarketPosition;
-							Print($"📍 Using strategy position: {positionDirection} @ {positionPrice:F2}");
-						}
-						
-						// Method 3: Last resort - use current price and infer direction from actualPosition
-						if (positionPrice == 0)
-						{
-							positionPrice = Close[0];
-							positionDirection = actualPosition == "Long" ? MarketPosition.Long : MarketPosition.Short;
-							Print($"📍 Inferring position: {positionDirection} @ current price {positionPrice:F2}");
-						}
-						
-						// Synchronize strategy variables
-						if (positionPrice > 0)
-						{
-							entryPrice = positionPrice;
-							lastEntryPrice = positionPrice;
-							lastEntryTime = DateTime.Now; // Approximate since we don't have exact entry time
-							entryTime = DateTime.Now;
-							
-							// Set direction based on position
-							if (positionDirection == MarketPosition.Long)
-							{
-								lastTradeDirection = "Long";
-								longEntryPrice = positionPrice;
-								Print($"✅ SYNCHRONIZED Long position @ {positionPrice:F2}");
-							}
-							else if (positionDirection == MarketPosition.Short)
-							{
-								lastTradeDirection = "Short";
-								shortEntryPrice = positionPrice;
-								Print($"✅ SYNCHRONIZED Short position @ {positionPrice:F2}");
-							}
-							
-							// Calculate approximate stops and targets based on ATR
-							if (atr != null && atr.IsValidDataPoint(0))
-							{
-								double atrValue = atr[0];
-								if (positionDirection == MarketPosition.Long)
-								{
-									stopLoss = positionPrice - (atrValue * riskMultiplier);
-									target1 = positionPrice + (atrValue * 1.5);
-									target2 = positionPrice + (atrValue * 2.5);
-								}
-								else
-								{
-									stopLoss = positionPrice + (atrValue * riskMultiplier);
-									target1 = positionPrice - (atrValue * 1.5);
-									target2 = positionPrice - (atrValue * 2.5);
-								}
-								Print($"✅ CALCULATED Stop: {stopLoss:F2}, T1: {target1:F2}, T2: {target2:F2}");
-							}
-							else
-							{
-								Print("⚠️ ATR not available - cannot calculate stops and targets");
-							}
-							
-							Print("🎯 POSITION SYNCHRONIZATION COMPLETE");
-						}
-						else
-						{
-							Print("❌ Could not determine position price for synchronization");
-						}
+						Print("🔄 Position closed externally - resetting strategy variables");
+						ResetPositionVariables();
 					}
-					else
-					{
-						Print("✅ Position already synchronized - Strategy variables match account");
-						Print($"   Entry Price: {entryPrice:F2}, Direction: {lastTradeDirection}");
-					}
-				}
-				else if (actualPosition == "Flat" && actualSize == 0)
-				{
-					// Ensure strategy variables are reset
-					Print("✅ Account is FLAT - Ensuring strategy variables are reset");
-					ResetPositionVariables();
 				}
 				else
 				{
-					Print($"⚠️ Inconsistent position data - Status: {actualPosition}, Size: {actualSize}");
+					// Active position
+					if (entryPrice == 0)
+					{
+						Print($"🔄 New position detected: {accountPos.MarketPosition} {accountPos.Quantity} @ {accountPos.AveragePrice:F2}");
+						
+						entryPrice = accountPos.AveragePrice;
+						lastEntryPrice = accountPos.AveragePrice;
+						lastTradeDirection = accountPos.MarketPosition.ToString();
+						entryTime = DateTime.Now;
+						lastEntryTime = DateTime.Now;
+						
+						// Set stops/targets based on current market
+						if (atr?.IsValidDataPoint(0) == true)
+						{
+							double atrValue = atr[0];
+							if (accountPos.MarketPosition == MarketPosition.Long)
+							{
+								longEntryPrice = accountPos.AveragePrice;
+								stopLoss = accountPos.AveragePrice - (atrValue * riskMultiplier);
+								target1 = accountPos.AveragePrice + (atrValue * 1.5);
+								target2 = accountPos.AveragePrice + (atrValue * 2.5);
+							}
+							else
+							{
+								shortEntryPrice = accountPos.AveragePrice;
+								stopLoss = accountPos.AveragePrice + (atrValue * riskMultiplier);
+								target1 = accountPos.AveragePrice - (atrValue * 1.5);
+								target2 = accountPos.AveragePrice - (atrValue * 2.5);
+							}
+							Print($"✅ SYNC COMPLETE: Stop={stopLoss:F2}, T1={target1:F2}, T2={target2:F2}");
+						}
+					}
 				}
 			}
 			catch (Exception ex)
 			{
-				Print($"❌ Error synchronizing with account position: {ex.Message}");
-				Print($"❌ Stack trace: {ex.StackTrace}");
+				Print($"❌ Error in simplified position sync: {ex.Message}");
 			}
 		}
 		

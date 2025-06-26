@@ -25,24 +25,60 @@ React Dashboard (Next.js)
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
+### 1. Install Dependencies (First Time Only)
 ```bash
 cd d:/Coding/TradingDashboard
 npm install
 ```
 
-### 2. Start the Dashboard Server
-```bash
-npm run server
+### 2. Start Complete Trading System
+```batch
+start-complete-system.bat
+```
+This automatically:
+- Kills any existing processes
+- Starts Redis server
+- Sets up PostgreSQL database
+- Starts ML server with TensorFlow
+- Starts trading dashboard
+- Opens browser to dashboard
+
+### 3. Alternative Startup Options
+
+#### 🏆 RECOMMENDED: Windows Command Prompt (separate windows):
+```batch
+# Full system
+start-complete-system.bat
+
+# Testing/development (faster)
+start-test-system.bat
+
+# Dashboard only
+start-dashboard-only.bat
+
+# Stop everything
+stop-all-processes.bat
 ```
 
-### 3. Start the Web Dashboard
+#### Alternative: Git Bash/Linux (background processes):
 ```bash
-npm run dev
+# Make executable (first time)
+chmod +x *.sh
+
+# Full system  
+./start-complete-system.sh
+
+# Stop everything
+./stop-all-processes.sh
 ```
+
+### ⚠️ Important Startup Notes
+- **First startup takes 30-45 seconds** (TensorFlow model creation)
+- **Always stop existing processes first** to avoid port conflicts
+- **Use `.bat` files in Windows CMD, `.sh` files in Git Bash**
 
 ### 4. Run Your NinjaTrader Strategy
-Your ScalperProWithML strategy will automatically connect to the dashboard.
+Your ScalperProWithML strategy will automatically connect once the system is running.
 
 ## 📱 Dashboard Access
 
