@@ -32,7 +32,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 	public class ScalperProWithML : Strategy
 	{
 		#region Variables
-		private EMA ema5, ema8, ema13, ema21, ema50;
+		private EMA ema5, ema8, ema13, ema21, ema50, ema200;
 		private RSI rsi;
 		private ADX adx;
 		private bool isLongSignal = false;
@@ -299,8 +299,47 @@ namespace NinjaTrader.NinjaScript.Strategies
 					
 				string cmd = command["command"].ToString();
 				
+				// DEBUG: Print the exact command for debugging
+				Print($"🔍 DEBUG: Processing ML command: '{cmd}' (length: {cmd.Length})");
+				
+				// Validate trading permissions first
+				if ((cmd == "go_long" || cmd == "go_short" || cmd == "close_position") && tradingDisabled)
+				{
+					Print($"🛑 ML Command '{cmd}' rejected: Trading is disabled");
+					return;
+				}
+				
+				// Check circuit breakers for trading commands
+				if ((cmd == "go_long" || cmd == "go_short") && !CheckCircuitBreakers())
+				{
+					Print($"🛑 ML Command '{cmd}' rejected: Circuit breakers active");
+					return;
+				}
+				
 				switch (cmd)
 				{
+					// TRADING COMMANDS
+					case "go_long":
+						ExecuteMLLongCommand(command);
+						break;
+						
+					case "go_short":
+						ExecuteMLShortCommand(command);
+						break;
+						
+					case "close_position":
+						ExecuteMLCloseCommand(command);
+						break;
+						
+					case "update_stop":
+						ExecuteMLStopUpdateCommand(command);
+						break;
+						
+					case "update_target":
+						ExecuteMLTargetUpdateCommand(command);
+						break;
+						
+					// CONFIGURATION COMMANDS
 					case "disable_trading":
 						tradingDisabled = true;
 						Print("🛑 ML Command: Trading disabled");
@@ -347,6 +386,236 @@ namespace NinjaTrader.NinjaScript.Strategies
 			catch (Exception ex)
 			{
 				Print($"Error handling ML command: {ex.Message}");
+			}
+		}
+		
+		// ML Trading Command Execution Methods
+		private void ExecuteMLLongCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				// Don't enter if already long
+				if (Position.MarketPosition == MarketPosition.Long)
+				{
+					Print("📊 ML Long command ignored: Already in long position");
+					return;
+				}
+				
+				// Parse command parameters
+				int quantity = (int)ParseDouble(command, "quantity", OrderQuantity);
+				double entryPrice = ParseDouble(command, "entry_price", Close[0]);
+				double stopPrice = ParseDouble(command, "stop_price", 0);
+				double targetPrice = ParseDouble(command, "target_price", 0);
+				string reason = ParseString(command, "reason", "ML Signal");
+				
+				Print($"📈 Executing ML Long Command: Qty={quantity}, Entry={entryPrice:F2}, Stop={stopPrice:F2}, Target={targetPrice:F2}");
+				
+				// Close any short position first
+				if (Position.MarketPosition == MarketPosition.Short)
+				{
+					ExecuteTradeWithRetry(() => ExitShort(), "ML Long - Close Short", 3);
+				}
+				
+				// Enter long position
+				ExecuteTradeWithRetry(() => {
+					EnterLong(quantity, "ML_Long");
+					entryPrice = entryPrice > 0 ? entryPrice : Close[0];
+					TrackEntry("Long", "ML", entryPrice);
+					
+					// Set stops and targets if provided
+					if (stopPrice > 0)
+					{
+						stopLoss = stopPrice;
+						SetStopLoss("ML_Long", CalculationMode.Price, stopPrice, false);
+					}
+					if (targetPrice > 0)
+					{
+						target1 = targetPrice;
+						SetProfitTarget("ML_Long", CalculationMode.Price, targetPrice);
+					}
+				}, "ML Long Entry", 3);
+				
+				// Send confirmation back to ML server
+				SendMLCommandConfirmation("go_long", true, reason);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error executing ML long command: {ex.Message}");
+				SendMLCommandConfirmation("go_long", false, $"Error: {ex.Message}");
+			}
+		}
+		
+		private void ExecuteMLShortCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				// Don't enter if already short
+				if (Position.MarketPosition == MarketPosition.Short)
+				{
+					Print("📊 ML Short command ignored: Already in short position");
+					return;
+				}
+				
+				// Parse command parameters
+				int quantity = (int)ParseDouble(command, "quantity", OrderQuantity);
+				double entryPrice = ParseDouble(command, "entry_price", Close[0]);
+				double stopPrice = ParseDouble(command, "stop_price", 0);
+				double targetPrice = ParseDouble(command, "target_price", 0);
+				string reason = ParseString(command, "reason", "ML Signal");
+				
+				Print($"📉 Executing ML Short Command: Qty={quantity}, Entry={entryPrice:F2}, Stop={stopPrice:F2}, Target={targetPrice:F2}");
+				
+				// Close any long position first
+				if (Position.MarketPosition == MarketPosition.Long)
+				{
+					ExecuteTradeWithRetry(() => ExitLong(), "ML Short - Close Long", 3);
+				}
+				
+				// Enter short position
+				ExecuteTradeWithRetry(() => {
+					EnterShort(quantity, "ML_Short");
+					entryPrice = entryPrice > 0 ? entryPrice : Close[0];
+					TrackEntry("Short", "ML", entryPrice);
+					
+					// Set stops and targets if provided
+					if (stopPrice > 0)
+					{
+						stopLoss = stopPrice;
+						SetStopLoss("ML_Short", CalculationMode.Price, stopPrice, false);
+					}
+					if (targetPrice > 0)
+					{
+						target1 = targetPrice;
+						SetProfitTarget("ML_Short", CalculationMode.Price, targetPrice);
+					}
+				}, "ML Short Entry", 3);
+				
+				// Send confirmation back to ML server
+				SendMLCommandConfirmation("go_short", true, reason);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error executing ML short command: {ex.Message}");
+				SendMLCommandConfirmation("go_short", false, $"Error: {ex.Message}");
+			}
+		}
+		
+		private void ExecuteMLCloseCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				if (Position.MarketPosition == MarketPosition.Flat)
+				{
+					Print("📊 ML Close command ignored: No open position");
+					return;
+				}
+				
+				string reason = ParseString(command, "reason", "ML Close Signal");
+				Print($"🔄 Executing ML Close Command: Closing {Position.MarketPosition} position, Reason: {reason}");
+				
+				ExecuteTradeWithRetry(() => {
+					if (Position.MarketPosition == MarketPosition.Long)
+						ExitLong();
+					else if (Position.MarketPosition == MarketPosition.Short)
+						ExitShort();
+				}, "ML Close Position", 3);
+				
+				SendMLCommandConfirmation("close_position", true, reason);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error executing ML close command: {ex.Message}");
+				SendMLCommandConfirmation("close_position", false, $"Error: {ex.Message}");
+			}
+		}
+		
+		private void ExecuteMLStopUpdateCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				if (Position.MarketPosition == MarketPosition.Flat)
+				{
+					Print("📊 ML Stop update ignored: No open position");
+					return;
+				}
+				
+				double newStopPrice = ParseDouble(command, "stop_price", 0);
+				if (newStopPrice <= 0)
+				{
+					Print("❌ ML Stop update failed: Invalid stop price");
+					return;
+				}
+				
+				string reason = ParseString(command, "reason", "ML Stop Update");
+				Print($"🎯 Updating stop loss to {newStopPrice:F2}, Reason: {reason}");
+				
+				stopLoss = newStopPrice;
+				string signalName = Position.MarketPosition == MarketPosition.Long ? "ML_Long" : "ML_Short";
+				SetStopLoss(signalName, CalculationMode.Price, newStopPrice, false);
+				
+				SendMLCommandConfirmation("update_stop", true, reason);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error updating ML stop: {ex.Message}");
+				SendMLCommandConfirmation("update_stop", false, $"Error: {ex.Message}");
+			}
+		}
+		
+		private void ExecuteMLTargetUpdateCommand(Dictionary<string, object> command)
+		{
+			try
+			{
+				if (Position.MarketPosition == MarketPosition.Flat)
+				{
+					Print("📊 ML Target update ignored: No open position");
+					return;
+				}
+				
+				double newTargetPrice = ParseDouble(command, "target_price", 0);
+				if (newTargetPrice <= 0)
+				{
+					Print("❌ ML Target update failed: Invalid target price");
+					return;
+				}
+				
+				string reason = ParseString(command, "reason", "ML Target Update");
+				Print($"🎯 Updating profit target to {newTargetPrice:F2}, Reason: {reason}");
+				
+				target1 = newTargetPrice;
+				string signalName = Position.MarketPosition == MarketPosition.Long ? "ML_Long" : "ML_Short";
+				SetProfitTarget(signalName, CalculationMode.Price, newTargetPrice);
+				
+				SendMLCommandConfirmation("update_target", true, reason);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error updating ML target: {ex.Message}");
+				SendMLCommandConfirmation("update_target", false, $"Error: {ex.Message}");
+			}
+		}
+		
+		// Send command execution confirmation back to ML server
+		private void SendMLCommandConfirmation(string command, bool success, string message)
+		{
+			try
+			{
+				var confirmationData = new Dictionary<string, object>
+				{
+					["command"] = command,
+					["success"] = success,
+					["message"] = message,
+					["position"] = Position.MarketPosition.ToString(),
+					["position_size"] = Position.Quantity,
+					["unrealized_pnl"] = Position.GetUnrealizedProfitLoss(PerformanceUnit.Currency, Close[0])
+				};
+				
+				string jsonMessage = CreateJsonString("command_confirmation", instrumentName, DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), confirmationData);
+				EnqueueMLMessage(jsonMessage);
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error sending ML command confirmation: {ex.Message}");
 			}
 		}
 		
@@ -631,6 +900,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				reusableDataDict["volume"] = Volume[0];
 				reusableDataDict["volume_ratio"] = CalculateVolumeRatio();
 				reusableDataDict["regime"] = GetHTFBias() ? "Bullish" : "Bearish";
+				reusableDataDict["ema200"] = ema200[0];
 
 					string json = CreateOptimizedJsonString("market_data", Instrument.FullName,
 						DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), reusableDataDict);
@@ -884,9 +1154,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 			try
 			{
 				double score = 0;
-				double[] emas = { ema5[0], ema8[0], ema13[0], ema21[0], ema50[0] };
+				double[] emas = { ema5[0], ema8[0], ema13[0], ema21[0], ema50[0], ema200[0] };
 				
-				// Check bullish alignment (5 > 8 > 13 > 21 > 50)
+				// Check bullish alignment (5 > 8 > 13 > 21 > 50 > 200)
 				bool bullishAlignment = true;
 				bool bearishAlignment = true;
 				
@@ -947,12 +1217,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 		
 		private bool IsEMABullishAlignment()
 		{
-			return ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0];
+			return ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0] && ema21[0] > ema50[0] && ema50[0] > ema200[0];
 		}
 		
 		private bool IsEMABearishAlignment()
 		{
-			return ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0];
+			return ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0] && ema21[0] < ema50[0] && ema50[0] < ema200[0];
 		}
 		
 		private double CalculateRSISignalScore()
@@ -1128,6 +1398,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 			if (ema8[0] > ema13[0]) score += 25;
 			if (ema13[0] > ema21[0]) score += 25;
 			if (ema21[0] > ema50[0]) score += 25;
+			if (ema50[0] > ema200[0]) score += 25;
 			return score;
 		}
 
@@ -1271,20 +1542,21 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Values[2][0] = ema13[0];
 				Values[3][0] = ema21[0];
 				Values[4][0] = ema50[0];
+				Values[5][0] = ema200[0];
 
 				// Optimized ribbon coloring for tick mode
-				bool bullishAlignment = ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0];
-				bool bearishAlignment = ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0];
+				bool bullishAlignment = ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0] && ema21[0] > ema50[0] && ema50[0] > ema200[0];
+				bool bearishAlignment = ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0] && ema21[0] < ema50[0] && ema50[0] < ema200[0];
 
 				Brush ribbonColor = bullishAlignment ? Brushes.LimeGreen : 
 								   bearishAlignment ? Brushes.Red : Brushes.Gray;
 
-				for (int i = 0; i < 4; i++)
+				for (int i = 0; i < 6; i++)
 				{
 					PlotBrushes[i][0] = ribbonColor;
 				}
 
-				PlotBrushes[4][0] = Close[0] > ema50[0] ? Brushes.LimeGreen : Brushes.Crimson;
+				PlotBrushes[6][0] = Close[0] > ema50[0] ? Brushes.LimeGreen : Brushes.Crimson;
 				
 				// Show current indicator values
 				string emaInfo = string.Format("EMA5: {0:F2} | EMA8: {1:F2} | RSI: {2:F1}", 
@@ -1929,6 +2201,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 						["ema13"] = ema13[0],
 						["ema21"] = ema21[0],
 						["ema50"] = ema50[0],
+						["ema200"] = ema200[0],
 						["adx"] = adx != null ? adx[0] : 25,
 						["volume"] = Volume[0],
 						["timestamp"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
@@ -2215,6 +2488,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				AddPlot(new Stroke(Brushes.Orange, 2), PlotStyle.Line, "EMA13");
 				AddPlot(new Stroke(Brushes.Red, 2), PlotStyle.Line, "EMA21");
 				AddPlot(new Stroke(Brushes.Blue, 2), PlotStyle.Line, "EMA50");
+				AddPlot(new Stroke(Brushes.Purple, 2), PlotStyle.Line, "EMA200");
 			}
 			else if (State == State.Configure)
 			{
@@ -2227,6 +2501,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				ema13 = EMA(13);
 				ema21 = EMA(21);
 				ema50 = EMA(50);
+				ema200 = EMA(200);
 				
 				// Initialize RSI
 				rsi = RSI(RSIPeriod, 1);
@@ -2239,7 +2514,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 			else if (State == State.DataLoaded)
 			{
 				// Verify indicator initialization
-				if (ema5 == null || ema8 == null || ema13 == null || ema21 == null || ema50 == null || rsi == null)
+				if (ema5 == null || ema8 == null || ema13 == null || ema21 == null || ema50 == null || rsi == null || ema200 == null)
 				{
 					Print("Error: Indicators not properly initialized");
 					return;
@@ -2374,10 +2649,11 @@ namespace NinjaTrader.NinjaScript.Strategies
 					Values[2][0] = ema13[0];
 					Values[3][0] = ema21[0];
 					Values[4][0] = ema50[0];
+					Values[5][0] = ema200[0];
 
 					// Ribbon coloring logic (match indicator)
-					bool bullishAlignment = ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0];
-					bool bearishAlignment = ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0];
+					bool bullishAlignment = ema5[0] > ema8[0] && ema8[0] > ema13[0] && ema13[0] > ema21[0] && ema21[0] > ema50[0] && ema50[0] > ema200[0];
+					bool bearishAlignment = ema5[0] < ema8[0] && ema8[0] < ema13[0] && ema13[0] < ema21[0] && ema21[0] < ema50[0] && ema50[0] < ema200[0];
 
 					if (bullishAlignment)
 					{
@@ -2385,6 +2661,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 						PlotBrushes[1][0] = Brushes.LimeGreen;
 						PlotBrushes[2][0] = Brushes.LimeGreen;
 						PlotBrushes[3][0] = Brushes.LimeGreen;
+						PlotBrushes[4][0] = Brushes.LimeGreen;
+						PlotBrushes[5][0] = Brushes.LimeGreen;
 					}
 					else if (bearishAlignment)
 					{
@@ -2392,6 +2670,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 						PlotBrushes[1][0] = Brushes.Red;
 						PlotBrushes[2][0] = Brushes.Red;
 						PlotBrushes[3][0] = Brushes.Red;
+						PlotBrushes[4][0] = Brushes.Red;
+						PlotBrushes[5][0] = Brushes.Red;
 					}
 					else
 					{
@@ -2399,16 +2679,18 @@ namespace NinjaTrader.NinjaScript.Strategies
 						PlotBrushes[1][0] = Brushes.Gray;
 						PlotBrushes[2][0] = Brushes.Gray;
 						PlotBrushes[3][0] = Brushes.Gray;
+						PlotBrushes[4][0] = Brushes.Gray;
+						PlotBrushes[5][0] = Brushes.Gray;
 					}
 
 					// Color the EMA50 line based on HTF bias
 					if (Close[0] > ema50[0])
 					{
-						PlotBrushes[4][0] = Brushes.LimeGreen;
+						PlotBrushes[6][0] = Brushes.LimeGreen;
 					}
 					else
 					{
-						PlotBrushes[4][0] = Brushes.Crimson;
+						PlotBrushes[6][0] = Brushes.Crimson;
 					}
 
 					// Show current values
@@ -3050,16 +3332,16 @@ namespace NinjaTrader.NinjaScript.Strategies
 				lastEntryPrice,
 				exitPrice,
 				pnl,
-				ema5[0], ema8[0], ema13[0], ema21[0], ema50[0],
+				ema5[0], ema8[0], ema13[0], ema21[0], ema50[0], ema200[0],
 				rsi[0], atr[0],
 				lastEntryTime,
 				Time[0]
 			);
 		}
 
-		private void LogTrade(string direction, string tradeType, double entry, double exit, double pnl, double ema5, double ema8, double ema13, double ema21, double ema50, double rsi, double atr, DateTime entryTime, DateTime exitTime)
+		private void LogTrade(string direction, string tradeType, double entry, double exit, double pnl, double ema5, double ema8, double ema13, double ema21, double ema50, double ema200, double rsi, double atr, DateTime entryTime, DateTime exitTime)
 		{
-			string logLine = $"{entryTime},{exitTime},{direction},{tradeType},{entry},{exit},{pnl},{ema5},{ema8},{ema13},{ema21},{ema50},{rsi},{atr}";
+			string logLine = $"{entryTime},{exitTime},{direction},{tradeType},{entry},{exit},{pnl},{ema5},{ema8},{ema13},{ema21},{ema50},{ema200},{rsi},{atr}";
 			System.IO.File.AppendAllText(logFilePath, logLine + Environment.NewLine);
 		}
 

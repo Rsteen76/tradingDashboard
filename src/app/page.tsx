@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { io, Socket } from 'socket.io-client'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import ConnectionStatus from '@/components/ConnectionStatus'
 import Toast from '@/components/Toast'
 import MLPanel from '@/components/MLPanel'
@@ -11,132 +10,20 @@ import UpcomingTradesPanel from '@/components/UpcomingTradesPanel'
 import AIIntelligencePanel from '@/components/AIIntelligencePanel'
 import SmartTrailingPanel from '@/components/SmartTrailingPanel'
 import { TradingErrorBoundary } from '@/components/ErrorBoundary'
-import { validateStrategyData, PerformanceMonitor } from '@/utils/dataValidation'
-
-interface StrategyData {
-  instrument?: string
-  price?: number
-  signal_strength?: number
-  ml_probability?: number
-  rsi?: number
-  ema_alignment?: number
-  pnl?: number
-  position?: string
-  position_size?: number
-  timestamp?: string
-  strategy_name?: string
-  strategy_instance_id?: string
-  entry_price?: number
-  stop_loss?: number
-  target_price?: number
-  target1?: number
-  target2?: number
-  overall_signal_strength?: number
-  signal_probability_long?: number
-  signal_probability_short?: number
-  ema_alignment_score?: number
-  htf_bias?: string
-  volatility_state?: string
-  market_regime?: string
-  ml_long_probability?: number
-  ml_short_probability?: number
-  ml_confidence_level?: number
-  ml_volatility_prediction?: number
-  ml_market_regime?: string
-  bid?: number
-  ask?: number
-  spread?: number
-  volume?: number
-  // New ML-powered trade level fields
-  next_long_entry_level?: number
-  next_short_entry_level?: number
-  long_entry_quality?: number
-  short_entry_quality?: number
-  ml_trade_recommendation?: string
-  recommended_position_size?: number
-  ml_mode?: string
-  last_ml_update?: string
-  data_source?: string
-  
-  // Smart Trailing Status Fields
-  smart_trailing_enabled?: boolean
-  smart_trailing_active?: boolean
-  current_smart_stop?: number
-  active_trailing_algorithm?: string
-  trailing_confidence_threshold?: number
-  trailing_update_interval?: number
-  max_stop_movement_atr?: number
-  
-  // Risk Management Fields
-  trading_disabled?: boolean
-  consecutive_losses?: number
-  daily_loss?: number
-}
-
-interface ConnectionState {
-  status: 'connected' | 'disconnected'
-  ninjaTraderConnected: boolean
-  isActive: boolean
-  startTime?: string
-  lastHeartbeat?: string
-}
-
-interface ToastMessage {
-  id: string
-  message: string
-  type: 'success' | 'error' | 'info'
-}
-
-interface ContractSpecs {
-  tickSize: number
-  tickValue: number
-  pointValue: number
-  displayName: string
-}
-
-function getContractSpecs(instrument?: string): ContractSpecs {
-  if (!instrument) return { tickSize: 0.25, tickValue: 12.5, pointValue: 50, displayName: 'ES' }
-  
-  const upperInstrument = instrument.toUpperCase()
-  
-  // E-mini S&P 500 (ES)
-  if (upperInstrument.includes('ES') || upperInstrument.includes('S&P') || upperInstrument.includes('SPX')) {
-    return { tickSize: 0.25, tickValue: 12.5, pointValue: 50, displayName: 'ES' }
-  }
-  
-  // E-mini Nasdaq (NQ)
-  if (upperInstrument.includes('NQ') || upperInstrument.includes('NASDAQ')) {
-    return { tickSize: 0.25, tickValue: 5, pointValue: 20, displayName: 'NQ' }
-  }
-  
-  // E-mini Russell 2000 (RTY)
-  if (upperInstrument.includes('RTY') || upperInstrument.includes('RUSSELL')) {
-    return { tickSize: 0.1, tickValue: 5, pointValue: 50, displayName: 'RTY' }
-  }
-  
-  // E-mini Dow (YM)
-  if (upperInstrument.includes('YM') || upperInstrument.includes('DOW')) {
-    return { tickSize: 1, tickValue: 5, pointValue: 5, displayName: 'YM' }
-  }
-  
-  // Crude Oil (CL)
-  if (upperInstrument.includes('CL') || upperInstrument.includes('CRUDE')) {
-    return { tickSize: 0.01, tickValue: 10, pointValue: 1000, displayName: 'CL' }
-  }
-  
-  // Gold (GC)
-  if (upperInstrument.includes('GC') || upperInstrument.includes('GOLD')) {
-    return { tickSize: 0.1, tickValue: 10, pointValue: 100, displayName: 'GC' }
-  }
-  
-  // Euro (6E)
-  if (upperInstrument.includes('6E') || upperInstrument.includes('EUR')) {
-    return { tickSize: 0.0001, tickValue: 12.5, pointValue: 125000, displayName: '6E' }
-  }
-  
-  // Default to ES specs if unknown
-  return { tickSize: 0.25, tickValue: 12.5, pointValue: 50, displayName: 'ES' }
-}
+import TradeDecisionPanel from '@/components/TradeDecisionPanel'
+import LiveChart from '@/components/LiveChart'
+import PositionPanel from '@/components/PositionPanel'
+import RiskManagementPanel from '@/components/RiskManagementPanel'
+import TradingVisualizer from '@/components/TradingVisualizer'
+import { Card } from '@/components/ui/card'
+import MLInsightsPanel from '@/components/MLInsightsPanel'
+import MarketAnalysisPanel from '@/components/MarketAnalysisPanel'
+import PerformanceMetrics from '@/components/PerformanceMetrics'
+import { useSocket } from '@/hooks/useSocket'
+import { useDataValidation } from '@/hooks/useDataValidation'
+import TradeHistoryPanel from '@/components/TradeHistoryPanel'
+import SettingsPanel from '@/components/SettingsPanel'
+import ManualTradePanel from '@/components/ManualTradePanel'
 
 // Custom hook for smooth data transitions
 function useSmoothedData<T>(data: T, delay: number = 75): T {
@@ -154,7 +41,7 @@ function useSmoothedData<T>(data: T, delay: number = 75): T {
 }
 
 // Custom hook for debounced updates
-function useDebouncedValue<T>(value: T, delay: number = 25): T {
+function useDebouncedValue<T>(value: T, delay: number = 100): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value)
   
   useEffect(() => {
@@ -168,740 +55,260 @@ function useDebouncedValue<T>(value: T, delay: number = 25): T {
   return debouncedValue
 }
 
-// Enhanced data comparison with floating-point tolerance and ML stability
-function dataHasChanged(newData: StrategyData, oldData: StrategyData): boolean {
-  const tolerance = 0.001
-  const mlTolerance = 0.02 // Higher tolerance for ML data to reduce flashing
-  
-  // Critical data that should always update
-  const criticalKeys: (keyof StrategyData)[] = ['position', 'position_size', 'pnl']
-  // Regular data with normal tolerance
-  const regularKeys: (keyof StrategyData)[] = ['price', 'signal_strength', 'rsi']
-  // ML data with higher tolerance to reduce flashing
-  const mlKeys: (keyof StrategyData)[] = ['ml_long_probability', 'ml_short_probability', 'ml_confidence_level']
-  
-  // Check critical data first (always update if changed)
-  const criticalChanged = criticalKeys.some(key => {
-    const newVal = newData[key]
-    const oldVal = oldData[key]
-    return newVal !== oldVal
-  })
-  
-  if (criticalChanged) return true
-  
-  // Check regular data with normal tolerance
-  const regularChanged = regularKeys.some(key => {
-    const newVal = newData[key]
-    const oldVal = oldData[key]
-    
-    if (typeof newVal === 'number' && typeof oldVal === 'number') {
-      return Math.abs(newVal - oldVal) > tolerance
-    }
-    return newVal !== oldVal
-  })
-  
-  // Check ML data with higher tolerance
-  const mlChanged = mlKeys.some(key => {
-    const newVal = newData[key]
-    const oldVal = oldData[key]
-    
-    if (typeof newVal === 'number' && typeof oldVal === 'number') {
-      return Math.abs(newVal - oldVal) > mlTolerance
-    }
-    return newVal !== oldVal
-  })
-  
-  return regularChanged || mlChanged
-}
-
 export default function Dashboard() {
-  const [socket, setSocket] = useState<Socket | null>(null)
-  const [strategyData, setStrategyData] = useState<StrategyData>({})
-  const [connectionState, setConnectionState] = useState<ConnectionState>({
-    status: 'disconnected',
-    ninjaTraderConnected: false,
-    isActive: false
-  })
-  const [toasts, setToasts] = useState<ToastMessage[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [connectionStable, setConnectionStable] = useState(false)
-  const [lastDataTimestamp, setLastDataTimestamp] = useState<string>('')
+  const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, sendManualTrade } = useSocket()
+  const { isValid, errors } = useDataValidation(strategyData)
   
-  // Performance monitoring
-  useEffect(() => {
-    PerformanceMonitor.trackRender('Dashboard')
-  })
+  // Use smoothed data for UI updates
+  const smoothedData = useSmoothedData(strategyData, 75)
   
-  // Toast management with maximum limit
-  const MAX_TOASTS = 5
+  // Debounce ML data to prevent rapid updates
+  const debouncedMLData = useDebouncedValue(smoothedData, 100)
 
-  // Smooth data transitions
-  const smoothedStrategyData = useSmoothedData(strategyData, 75)
-  const debouncedData = useDebouncedValue(smoothedStrategyData, 25)
+  // Derive Trade Signal Panel data
+  const signalPanelData = useMemo(() => {
+    const s = smoothedData.strategyStatus ?? {}
+    const m = smoothedData.marketData ?? {}
 
-  // Simplified connection stability detection
-  useEffect(() => {
-    // Check if we have recent data
-    const hasRecentData = debouncedData.timestamp && 
-      (Date.now() - new Date(debouncedData.timestamp).getTime()) < 60000 // 60 seconds (more tolerant)
-
-    // Check for any data that indicates connection
-    const hasAnyData = debouncedData.price > 0 || 
-                      debouncedData.rsi > 0 || 
-                      debouncedData.instrument ||
-                      debouncedData.data_source === 'ml_intelligence_engine'
-
-    // Simple connection detection - if we have any data, we're stable
-    const shouldBeStable = hasAnyData
-
-    if (shouldBeStable && !connectionStable) {
-      setConnectionStable(true)
-      setIsLoading(false)
-    } else if (!hasAnyData && connectionStable) {
-      // Only go to loading if we truly have no data for a while
-      const timer = setTimeout(() => {
-        setConnectionStable(false)
-        setIsLoading(true)
-      }, 30000) // 30 seconds - very generous
-      return () => clearTimeout(timer)
-    }
-  }, [connectionState.isActive, debouncedData.timestamp, debouncedData.price, debouncedData.data_source, connectionStable])
-
-  const addToast = useCallback((message: string, type: ToastMessage['type'] = 'info') => {
-    const id = Date.now().toString()
-    setToasts(prev => {
-      const newToasts = [...prev, { id, message, type }]
-      // Limit maximum number of toasts to prevent UI overflow
-      return newToasts.slice(-MAX_TOASTS)
-    })
-    setTimeout(() => {
-      setToasts(prev => prev.filter(toast => toast.id !== id))
-    }, 5000)
-  }, [MAX_TOASTS])
-
-  // Monitor data freshness (less aggressive)
-  useEffect(() => {
-    if (debouncedData.timestamp) {
-      setLastDataTimestamp(debouncedData.timestamp)
-      
-      // Check for stale data every 60 seconds (less frequent)
-      const staleCheckInterval = setInterval(() => {
-        const dataAge = Date.now() - new Date(debouncedData.timestamp).getTime()
-        if (dataAge > 120000) { // 2 minutes (more tolerant)
-          setConnectionState(prev => ({
-            ...prev,
-            ninjaTraderConnected: false,
-            isActive: false
-          }))
-          addToast('Data connection appears stale', 'error')
-        }
-      }, 60000) // Check every 60 seconds instead of 30
-
-      return () => clearInterval(staleCheckInterval)
-    }
-  }, [debouncedData.timestamp, addToast])
-
-  useEffect(() => {
-    const newSocket = io('http://localhost:8080')
-    setSocket(newSocket)
-
-    newSocket.on('connect', () => {
-      console.log('Connected to ML Dashboard')
-      addToast('Connected to ML Dashboard', 'success')
-    })
-
-    newSocket.on('strategy_data', (rawData: any) => {
-      // Validate incoming data to prevent crashes
-      const data = validateStrategyData(rawData)
-      
-      // Reduce console logging to prevent spam
-      if (Math.random() < 0.05) { // 5% chance to log
-        console.log('Strategy data received:', data.instrument, data.price)
-      }
-      
-      setStrategyData(prevData => {
-        if (dataHasChanged(data, prevData)) {
-          // Auto-detect connection status from data content (less aggressive)
-          const hasValidData = data.price > 0 || 
-                              data.rsi > 0 || 
-                              data.instrument ||
-                              data.data_source === 'ml_intelligence_engine'
-          
-          // Only update connection state if we're currently disconnected
-          if (hasValidData && !connectionState.isActive) {
-            setConnectionState(prev => ({
-              ...prev,
-              ninjaTraderConnected: true,
-              isActive: true,
-              status: 'connected'
-            }))
-          }
-          
-          return data
-        }
-        return prevData
-      })
-    })
-
-    newSocket.on('connection_status', (status: any) => {
-      console.log('Connection status event:', status)
-      setConnectionState(prev => ({
-        ...prev,
-        status: status.status,
-        ninjaTraderConnected: status.status === 'connected'
-      }))
-      
-      if (status.status === 'connected') {
-        addToast('NinjaTrader strategy connected', 'success')
-      } else {
-        addToast('NinjaTrader strategy disconnected', 'error')
-      }
-    })
-
-    newSocket.on('strategy_connected', () => {
-      console.log('Strategy connected event')
-      setConnectionState(prev => ({
-        ...prev,
-        ninjaTraderConnected: true,
-        isActive: true,
-        status: 'connected'
-      }))
-      addToast('Strategy connected successfully', 'success')
-    })
-
-    newSocket.on('strategy_disconnected', () => {
-      console.log('Strategy disconnected event')
-      setConnectionState(prev => ({
-        ...prev,
-        ninjaTraderConnected: false,
-        isActive: false,
-        status: 'disconnected'
-      }))
-      addToast('Strategy disconnected', 'error')
-    })
-
-    // Handle heartbeat to prevent stale connections
-    newSocket.on('heartbeat', (heartbeatData: any) => {
-      // Only log heartbeat occasionally to reduce console spam
-      if (Math.random() < 0.1) { // 10% chance to log
-        console.log('Heartbeat received - ML server active')
-      }
-      
-      // Only update connection state if there's a significant change
-      setConnectionState(prevState => {
-        const newNinjaConnected = heartbeatData.ninja_connected || false
-        const newIsActive = heartbeatData.ml_server_status === 'active'
-        
-        // Only update if something actually changed
-        if (prevState.ninjaTraderConnected !== newNinjaConnected || prevState.isActive !== newIsActive) {
-          return {
-            ...prevState,
-            ninjaTraderConnected: newNinjaConnected,
-            isActive: newIsActive
-          }
-        }
-        return prevState
-      })
-      
-      // Keep connection alive by updating timestamp
-      setLastDataTimestamp(heartbeatData.timestamp)
-    })
-
-    // Handle disconnect from server
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from ML Dashboard')
-      setConnectionState(prev => ({
-        ...prev,
-        ninjaTraderConnected: false,
-        isActive: false,
-        status: 'disconnected'
-      }))
-      addToast('Lost connection to ML Dashboard', 'error')
-    })
-
-    return () => {
-      newSocket.close()
-    }
-  }, [addToast])
-
-  // Enhanced computed values with better P&L and next trade level logic
-  const computedValues = useMemo(() => {
-    const price = debouncedData.price || 0
-    const position = debouncedData.position || 'FLAT'
-    const positionSize = debouncedData.position_size || 0
-    const entryPrice = debouncedData.entry_price || 0
-    const unrealizedPnl = debouncedData.pnl || 0
-    const instrument = debouncedData.instrument || ''
-    
-    // Get contract specifications for accurate calculations
-    const contractSpecs = getContractSpecs(instrument)
-    
-    // Calculate real-time P&L - should be 0 when flat
-    let realTimePnl = 0 // Default to 0 for flat positions
-    
-    // Only calculate P&L if we actually have a position
-    if (positionSize > 0 && entryPrice > 0 && price > 0 && !position.toLowerCase().includes('flat')) {
-      const isLong = position.toUpperCase().includes('LONG')
-      const pointDifference = isLong 
-        ? (price - entryPrice) 
-        : (entryPrice - price)
-      
-      // Use correct contract multiplier for accurate P&L
-      realTimePnl = pointDifference * positionSize * contractSpecs.pointValue
-    }
-    
-    // Enhanced next trade level calculation
-    const stopLoss = debouncedData.stop_loss || 0
-    const targetPrice = debouncedData.target_price || 0
-    const target1 = debouncedData.target1 || 0
-    const target2 = debouncedData.target2 || 0
-    
-    // Calculate meaningful distances and levels
-    let nextTradeInfo = {
-      level: 0,
-      distance: 0,
-      type: 'None',
-      description: 'No levels set'
-    }
-    
-    // Enhanced logic to show the most relevant level
-    if (stopLoss > 0 || target1 > 0 || target2 > 0) {
-      const levels = []
-      
-      if (stopLoss > 0) {
-        levels.push({
-          level: stopLoss,
-          distance: Math.abs(price - stopLoss),
-          type: 'Stop Loss',
-          priority: 1 // Highest priority for risk management
-        })
-      }
-      
-      if (target1 > 0) {
-        levels.push({
-          level: target1,
-          distance: Math.abs(price - target1),
-          type: 'Target 1',
-          priority: 2
-        })
-      }
-      
-      if (target2 > 0) {
-        levels.push({
-          level: target2,
-          distance: Math.abs(price - target2),
-          type: 'Target 2',
-          priority: 3
-        })
-      }
-      
-      // Find the closest level
-      if (levels.length > 0) {
-        const closestLevel = levels.reduce((closest, current) => 
-          current.distance < closest.distance ? current : closest
-        )
-        
-        // Calculate dollar value of the distance
-        const dollarDistance = closestLevel.distance * contractSpecs.pointValue
-        
-        nextTradeInfo = {
-          level: closestLevel.level,
-          distance: closestLevel.distance,
-          type: closestLevel.type,
-          description: `${closestLevel.distance.toFixed(2)} pts ($${dollarDistance.toFixed(0)}) to ${closestLevel.type}`
-        }
+    // Determine signal direction based on probabilities
+    let signal_direction: 'long' | 'short' | 'flat' = 'flat'
+    if (
+      typeof s.signal_probability_long === 'number' &&
+      typeof s.signal_probability_short === 'number'
+    ) {
+      if (s.signal_probability_long > s.signal_probability_short && s.signal_probability_long > 0.5) {
+        signal_direction = 'long'
+      } else if (s.signal_probability_short > s.signal_probability_long && s.signal_probability_short > 0.5) {
+        signal_direction = 'short'
       }
     }
-    
-    // Position status with better detection
-    const isFlat = positionSize === 0 || position.toLowerCase().includes('flat') || position.toLowerCase().includes('disconnected')
-    const hasPosition = !isFlat && positionSize > 0
-    const positionType = isFlat ? 'FLAT' : 
-      (position.toUpperCase().includes('LONG') ? 'LONG' : 
-       position.toUpperCase().includes('SHORT') ? 'SHORT' : 'FLAT')
-    
+
+    const entry_price =
+      signal_direction === 'long'
+        ? s.next_long_entry_level ?? s.entry_price
+        : signal_direction === 'short'
+        ? s.next_short_entry_level ?? s.entry_price
+        : undefined
+
+    const stop_loss =
+      signal_direction === 'long' ? s.stop_level_long : signal_direction === 'short' ? s.stop_level_short : undefined
+
+    // Prefer target1, fallback to target2 if defined
+    const take_profit = s.target1 ?? s.target2
+
+    let risk_reward_ratio: number | undefined = undefined
+    if (
+      typeof entry_price === 'number' &&
+      typeof stop_loss === 'number' &&
+      typeof take_profit === 'number'
+    ) {
+      const risk = Math.abs(entry_price - stop_loss)
+      const reward = Math.abs(take_profit - entry_price)
+      if (risk > 0) risk_reward_ratio = reward / risk
+    }
+
+    const current_price = m.price ?? s.current_price
+
+    // Basic volatility proxy: ATR / price
+    const volatility =
+      typeof m.atr === 'number' && typeof current_price === 'number' && current_price > 0
+        ? m.atr / current_price
+        : undefined
+
+    const trend_alignment = typeof s.ema_alignment_score === 'number' ? Math.min(1, s.ema_alignment_score / 5) : undefined
+
+    const momentum_score =
+      signal_direction === 'long'
+        ? s.signal_probability_long
+        : signal_direction === 'short'
+        ? s.signal_probability_short
+        : undefined
+
+    const reasons: string[] = []
+
+    // If trading disabled by risk management
+    if (smoothedData.riskManagement?.trading_disabled) {
+      reasons.push('Trading disabled by risk management')
+    }
+
+    // If already in a trade
+    if (s.position && s.position.toLowerCase() !== 'flat' && s.position_size > 0) {
+      reasons.push(`Currently in an open ${s.position} position (size ${s.position_size})`)
+    }
+
+    // Thresholds
+    const strengthThreshold = 50
+    const confidenceThreshold = 0.6 // 60%
+
+    if (typeof s.overall_signal_strength === 'number' && s.overall_signal_strength < strengthThreshold) {
+      reasons.push(`Signal strength (${s.overall_signal_strength.toFixed(1)}%) below threshold (${strengthThreshold}%)`)
+    }
+
+    const bestProb = Math.max(s.signal_probability_long ?? 0, s.signal_probability_short ?? 0)
+    if (bestProb < confidenceThreshold) {
+      reasons.push(`Model confidence too low (${(bestProb * 100).toFixed(1)}% < ${(confidenceThreshold * 100).toFixed(0)}%)`)
+    }
+
+    // Volatility check if ATR is high relative to price ( >2%)
+    if (
+      typeof m.atr === 'number' &&
+      typeof current_price === 'number' &&
+      current_price > 0 &&
+      m.atr / current_price > 0.02
+    ) {
+      reasons.push('Market volatility too high')
+    }
+
+    // Daily risk check
+    if (
+      smoothedData.riskManagement?.daily_loss !== undefined &&
+      smoothedData.riskManagement?.max_daily_loss !== undefined &&
+      smoothedData.riskManagement.daily_loss > smoothedData.riskManagement.max_daily_loss
+    ) {
+      reasons.push('Daily loss limit exceeded')
+    }
+
+    // Build final object
     return {
-      price,
-      position: positionType,
-      positionSize,
-      entryPrice,
-      pnl: realTimePnl,
-      unrealizedPnl,
-      hasPosition,
-      nextTradeInfo,
-      stopLoss,
-      targetPrice,
-      target1,
-      target2,
-      // Contract specifications
-      contractSpecs,
-      instrument,
-      // Connection indicators
-      dataAge: debouncedData.timestamp ? Date.now() - new Date(debouncedData.timestamp).getTime() : 0,
-      isDataFresh: debouncedData.timestamp ? (Date.now() - new Date(debouncedData.timestamp).getTime()) < 30000 : false
+      // Signal Data
+      signal_type: 'entry', // Simplified assumption
+      signal_direction,
+      signal_strength: s.overall_signal_strength,
+      signal_quality: s.overall_signal_strength, // using same metric for now
+      signal_timeframe: 'Realtime',
+
+      // Entry/Exit Points
+      entry_price,
+      stop_loss,
+      take_profit,
+      risk_reward_ratio,
+      position_size: s.position_size,
+
+      // Market Context
+      current_price,
+      recent_high: m.recent_high,
+      recent_low: m.recent_low,
+      atr: m.atr,
+      volatility,
+
+      // Signal Components
+      trend_alignment,
+      momentum_score,
+      reversal_probability: undefined,
+      breakout_strength: undefined,
+      support_resistance_proximity: undefined,
+
+      // No trade reasons
+      no_trade_reasons: reasons,
     }
-  }, [debouncedData])
-
-  const LoadingSkeleton = () => (
-    <div className="animate-pulse bg-gray-700/50 rounded h-5 w-20"></div>
-  )
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-trading-dark text-white transition-opacity duration-500 opacity-90">
-        <div className="container mx-auto px-6 py-8">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="space-y-3">
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-trading-green via-trading-blue to-purple-400 bg-clip-text text-transparent animate-gradient">
-                ScalperPro ML Dashboard
-              </h1>
-              <p className="text-gray-400">Professional Trading Strategy Monitor</p>
-            </div>
-                      <ConnectionStatus 
-            isConnected={connectionState.ninjaTraderConnected}
-            isActive={connectionState.isActive}
-            dataAge={computedValues.dataAge}
-            lastUpdate={lastDataTimestamp}
-          />
-          </div>
-
-          {/* Loading State */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="trading-card p-8 rounded-xl">
-                <div className="animate-pulse bg-gray-700/50 rounded h-8 w-48 mb-6"></div>
-                <div className="animate-pulse bg-gray-700/50 rounded h-32 w-full"></div>
-              </div>
-            </div>
-            <div className="space-y-6">
-              <div className="trading-card p-6 rounded-xl">
-                <div className="animate-pulse bg-gray-700/50 rounded h-6 w-32 mb-4"></div>
-                <div className="space-y-3">
-                  <div className="animate-pulse bg-gray-700/50 rounded h-4 w-full"></div>
-                  <div className="animate-pulse bg-gray-700/50 rounded h-4 w-3/4"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  }, [smoothedData])
 
   return (
-    <div className="min-h-screen bg-trading-dark text-white transition-opacity duration-500 opacity-100">
-      <div className="container mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="space-y-3">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-trading-green via-trading-blue to-purple-400 bg-clip-text text-transparent animate-gradient">
-              ScalperPro ML Dashboard
-            </h1>
-            <div className="flex items-center gap-4">
-              <p className="text-gray-400">Professional Trading Strategy Monitor</p>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>{debouncedData.instrument || 'No Instrument'}</span>
-                <span>•</span>
-                <span>ScalperPro ML</span>
-              </div>
-            </div>
-          </div>
+    <div className="min-h-screen bg-gradient-to-b from-trading-dark to-trading-darker text-white">
+      <div className="max-w-[2000px] mx-auto p-4 space-y-4">
+        {/* Header with Connection Status */}
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-trading-green via-trading-blue to-purple-500">
+            AI Trading Dashboard
+          </h1>
           <ConnectionStatus 
-            isConnected={connectionState.ninjaTraderConnected}
-            isActive={connectionState.isActive}
-            dataAge={computedValues.dataAge}
-            lastUpdate={lastDataTimestamp}
+            isConnected={connectionState.isConnected} 
+            latency={connectionState.latency}
           />
         </div>
 
-        {/* Main Trading Overview */}
-        <div className="mb-8 p-6 bg-gradient-to-r from-gray-800/60 to-gray-900/60 rounded-xl border border-gray-700/50 backdrop-blur-sm">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {/* Current Price */}
-            <div className="text-center">
-              <div className="text-sm text-gray-400 mb-1">Current Price</div>
-              <div className="text-2xl font-bold text-white">
-                {connectionStable ? `$${computedValues.price.toLocaleString()}` : <LoadingSkeleton />}
+        <div className="grid grid-cols-12 gap-4">
+          {/* Left Column - Trading View & Controls */}
+          <div className="col-span-8 space-y-4">
+            <TradingErrorBoundary>
+              <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                <LiveChart data={marketDataHistory} />
+              </Card>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                  <PositionPanel 
+                    position={smoothedData.strategyStatus?.position}
+                    positionSize={smoothedData.strategyStatus?.position_size}
+                    entryPrice={smoothedData.strategyStatus?.entry_price}
+                    unrealizedPnl={smoothedData.strategyStatus?.unrealized_pnl}
+                    currentPrice={smoothedData.marketData?.price}
+                  />
+                </Card>
+
+                <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                  <SmartTrailingPanel
+                    enabled={smoothedData.strategyStatus?.smart_trailing_enabled}
+                    active={smoothedData.strategyStatus?.smart_trailing_active}
+                    currentStop={smoothedData.strategyStatus?.current_smart_stop}
+                    algorithm={smoothedData.strategyStatus?.active_trailing_algorithm}
+                    confidence={smoothedData.strategyStatus?.trailing_confidence_threshold}
+                  />
+                </Card>
               </div>
-            </div>
 
-            {/* Position Status */}
-            <div className="text-center">
-              <div className="text-sm text-gray-400 mb-1">Position</div>
-              <div className="flex items-center justify-center gap-2">
-                {connectionStable ? (
-                  <>
-                    <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      computedValues.hasPosition 
-                        ? computedValues.position === 'LONG' 
-                          ? 'bg-trading-green/20 text-trading-green border border-trading-green/30'
-                          : 'bg-trading-red/20 text-trading-red border border-trading-red/30'
-                        : 'bg-gray-700/50 text-gray-400 border border-gray-600'
-                    }`}>
-                      {computedValues.position}
-                    </div>
-                    {computedValues.hasPosition && (
-                      <span className="text-sm text-gray-400">
-                        {computedValues.positionSize} contracts
-                      </span>
-                    )}
-                  </>
-                ) : <LoadingSkeleton />}
+              <div className="grid grid-cols-2 gap-4">
+                <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                  <SignalPanel
+                    data={signalPanelData}
+                  />
+                </Card>
+
+                <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                  <TradeDecisionPanel data={debouncedMLData.strategyStatus} />
+                </Card>
               </div>
-            </div>
-
-            {/* P&L */}
-            <div className="text-center">
-              <div className="text-sm text-gray-400 mb-1">Unrealized P&L</div>
-              <div className={`text-xl font-bold ${
-                computedValues.pnl > 0 ? 'text-trading-green' : 
-                computedValues.pnl < 0 ? 'text-trading-red' : 'text-gray-400'
-              }`}>
-                {connectionStable ? `$${computedValues.pnl.toFixed(2)}` : <LoadingSkeleton />}
-              </div>
-            </div>
-
-            {/* Next Trade Distance */}
-            <div className="text-center">
-              <div className="text-sm text-gray-400 mb-1">Next Trade Level</div>
-              <div className="text-lg font-medium text-trading-blue">
-                {connectionStable ? (
-                  computedValues.nextTradeInfo.description
-                ) : <LoadingSkeleton />}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column - AI Intelligence & Smart Trailing */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* AI Intelligence Panel - Primary Focus */}
-            <TradingErrorBoundary componentName="AIIntelligencePanel">
-              <AIIntelligencePanel 
-                data={debouncedData} 
-                isLoading={!connectionStable}
-              />
-            </TradingErrorBoundary>
-
-            {/* Smart Trailing Panel - Show our advanced system */}
-            <TradingErrorBoundary componentName="SmartTrailingPanel">
-              <SmartTrailingPanel 
-                data={{
-                  ...debouncedData,
-                  current_price: debouncedData.price,
-                  entry_price: debouncedData.entry_price,
-                  unrealized_pnl: debouncedData.pnl,
-                  atr: computedValues.atr || 2.5 // Fallback ATR value
-                }} 
-                isLoading={!connectionStable}
-              />
-            </TradingErrorBoundary>
-
-            {/* Traditional ML Panel - Secondary */}
-            <TradingErrorBoundary componentName="MLPanel">
-              <MLPanel 
-                data={debouncedData} 
-                isLoading={!connectionStable}
-              />
             </TradingErrorBoundary>
           </div>
 
-          {/* Right Column - Position Management & Opportunities */}
-          <div className="space-y-6">
-            {/* Signal Analysis Panel - Focused on actionable signals */}
-            <TradingErrorBoundary componentName="SignalPanel">
-              <SignalPanel 
-                data={debouncedData} 
-                isLoading={!connectionStable}
-              />
-            </TradingErrorBoundary>
+          {/* Right Column - Risk & ML Analysis */}
+          <div className="col-span-4 space-y-4">
+            <TradingErrorBoundary>
+              <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                <RiskManagementPanel
+                  riskData={smoothedData.riskManagement}
+                  position={smoothedData.strategyStatus?.position}
+                  unrealizedPnl={smoothedData.strategyStatus?.unrealized_pnl}
+                />
+              </Card>
 
-            {/* ML-Powered Upcoming Trades Panel */}
-            <TradingErrorBoundary componentName="UpcomingTradesPanel">
-              <UpcomingTradesPanel 
-                data={debouncedData} 
-                isLoading={!connectionStable}
-              />
-            </TradingErrorBoundary>
+              <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                <MLInsightsPanel data={{ ...smoothedData.marketData, ...debouncedMLData.strategyStatus, ...mlPrediction }} />
+              </Card>
 
-            {/* Current Position Details (if in position) */}
-            {computedValues.hasPosition && connectionStable && (
-              <div className="trading-card p-6 rounded-xl">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full animate-pulse ${
-                    computedValues.position === 'LONG' ? 'bg-trading-green' : 'bg-trading-red'
-                  }`}></span>
-                  Active Position
-                </h3>
-                
-                <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Direction:</span>
-                    <span className={`font-medium ${
-                      computedValues.position === 'LONG' ? 'text-trading-green' : 'text-trading-red'
-                    }`}>
-                      {computedValues.position}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Size:</span>
-                    <span className="font-medium">{computedValues.positionSize} contracts</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Entry:</span>
-                    <span className="font-medium">${computedValues.entryPrice.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Current:</span>
-                    <span className="font-medium">${computedValues.price.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Contract:</span>
-                    <span className="font-medium text-blue-400">
-                      {computedValues.contractSpecs.displayName} (${computedValues.contractSpecs.pointValue}/pt)
-                    </span>
-                  </div>
-                  
-                  {/* Trade Levels Section */}
-                  {(computedValues.stopLoss > 0 || computedValues.target1 > 0 || computedValues.target2 > 0) && (
-                    <>
-                      <div className="border-t border-gray-700 pt-3 mt-3">
-                        <div className="text-sm text-gray-400 mb-2">Trade Levels</div>
-                        
-                        {computedValues.stopLoss > 0 && (
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-red-400 text-sm">Stop Loss:</span>
-                            <div className="text-right">
-                              <span className="font-medium text-red-400">${computedValues.stopLoss.toFixed(2)}</span>
-                              <div className="text-xs text-gray-500">
-                                {Math.abs(computedValues.price - computedValues.stopLoss).toFixed(2)} pts 
-                                (${(Math.abs(computedValues.price - computedValues.stopLoss) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {computedValues.target1 > 0 && (
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-yellow-400 text-sm">Target 1:</span>
-                            <div className="text-right">
-                              <span className="font-medium text-yellow-400">${computedValues.target1.toFixed(2)}</span>
-                              <div className="text-xs text-gray-500">
-                                {Math.abs(computedValues.price - computedValues.target1).toFixed(2)} pts 
-                                (${(Math.abs(computedValues.price - computedValues.target1) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {computedValues.target2 > 0 && (
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-green-400 text-sm">Target 2:</span>
-                            <div className="text-right">
-                              <span className="font-medium text-green-400">${computedValues.target2.toFixed(2)}</span>
-                              <div className="text-xs text-gray-500">
-                                {Math.abs(computedValues.price - computedValues.target2).toFixed(2)} pts 
-                                (${(Math.abs(computedValues.price - computedValues.target2) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                  
-                  <div className="flex justify-between border-t border-gray-700 pt-2">
-                    <span className="text-gray-400">P&L:</span>
-                    <span className={`font-bold ${
-                      computedValues.pnl > 0 ? 'text-trading-green' : 
-                      computedValues.pnl < 0 ? 'text-trading-red' : 'text-gray-400'
-                    }`}>
-                      ${computedValues.pnl.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            {/* Trade Levels Panel (when not in position but levels are set) */}
-            {!computedValues.hasPosition && connectionStable && 
-             (computedValues.stopLoss > 0 || computedValues.target1 > 0 || computedValues.target2 > 0) && (
-              <div className="trading-card p-6 rounded-xl">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
-                  Pending Trade Levels
-                </h3>
-                
-                <div className="space-y-3">
-                  {computedValues.stopLoss > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-red-400 text-sm">Stop Level:</span>
-                      <div className="text-right">
-                        <span className="font-medium text-red-400">${computedValues.stopLoss.toFixed(2)}</span>
-                        <div className="text-xs text-gray-500">
-                          {Math.abs(computedValues.price - computedValues.stopLoss).toFixed(2)} pts 
-                          (${(Math.abs(computedValues.price - computedValues.stopLoss) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {computedValues.target1 > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-yellow-400 text-sm">Target 1:</span>
-                      <div className="text-right">
-                        <span className="font-medium text-yellow-400">${computedValues.target1.toFixed(2)}</span>
-                        <div className="text-xs text-gray-500">
-                          {Math.abs(computedValues.price - computedValues.target1).toFixed(2)} pts 
-                          (${(Math.abs(computedValues.price - computedValues.target1) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {computedValues.target2 > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-green-400 text-sm">Target 2:</span>
-                      <div className="text-right">
-                        <span className="font-medium text-green-400">${computedValues.target2.toFixed(2)}</span>
-                        <div className="text-xs text-gray-500">
-                          {Math.abs(computedValues.price - computedValues.target2).toFixed(2)} pts 
-                          (${(Math.abs(computedValues.price - computedValues.target2) * computedValues.contractSpecs.pointValue).toFixed(0)})
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="text-xs text-gray-500 border-t border-gray-700 pt-2 mt-2">
-                    Next level: {computedValues.nextTradeInfo.description}
-                  </div>
-                </div>
-              </div>
-            )}
+              <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+                <MarketAnalysisPanel data={{ ...smoothedData.strategyStatus, ...smoothedData.marketData }} />
+              </Card>
+
+              <TradeHistoryPanel trades={tradeHistory} />
+
+              <SettingsPanel onSave={updateServerSettings} />
+
+              <ManualTradePanel onSend={sendManualTrade} />
+            </TradingErrorBoundary>
           </div>
         </div>
 
-        {/* Learning Analytics Section */}
-        <div className="mt-8">
-          <TradingErrorBoundary componentName="LearningPanel">
-            <LearningPanel />
-          </TradingErrorBoundary>
-        </div>
-
-        {/* Toast Notifications */}
-        <div className="fixed top-4 right-4 z-50 space-y-2">
-          {toasts.map(toast => (
-            <Toast
-              key={toast.id}
-              message={toast.message}
-              type={toast.type}
-              onClose={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+        {/* Footer - Performance Metrics */}
+        <div className="mt-4">
+          <Card className="p-4 bg-trading-card/30 backdrop-blur-sm">
+            <PerformanceMetrics
+              lastTrade={smoothedData.lastTrade}
+              riskManagement={smoothedData.riskManagement}
             />
-          ))}
+          </Card>
         </div>
+
+        {/* Error Handling */}
+        {!isValid && errors.length > 0 && (
+          <div className="fixed bottom-4 right-4 z-50">
+            <Toast
+              type="error"
+              message={errors.join('; ')}
+              onClose={() => {}}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

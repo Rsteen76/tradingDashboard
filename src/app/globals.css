@@ -2,522 +2,245 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 15, 15, 35;
-  --background-end-rgb: 26, 26, 46;
-  --trading-green: #00ff88;
-  --trading-red: #ff4757;
-  --trading-blue: #3742fa;
-  --trading-purple: #a55eea;
-  --trading-yellow: #ffa502;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 15, 15, 35;
-    --background-end-rgb: 26, 26, 46;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --trading-green: #00ff88;
+    --trading-red: #ff4757;
+    --trading-blue: #3742fa;
+    --trading-purple: #a55eea;
+    --trading-yellow: #ffa502;
+    --radius: 0.5rem;
   }
 }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      135deg,
-      rgb(var(--background-start-rgb)) 0%,
-      rgb(var(--background-end-rgb)) 100%
-    );
-  background-attachment: fixed;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  /* Optimize rendering performance */
-  will-change: auto;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  perspective: 1000px;
-  overflow-x: hidden;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-gradient-to-br from-trading-dark via-trading-darker to-black min-h-screen text-foreground;
+  }
 }
 
-/* Performance optimizations */
+/* Card Styling */
+.bg-trading-card {
+  @apply bg-trading-dark/50 backdrop-blur-lg border border-trading-border transition-all duration-300;
+}
+
+.bg-trading-card:hover {
+  @apply bg-trading-dark/60 border-trading-green/30;
+}
+
+/* Gradient Effects */
+.trading-gradient {
+  @apply bg-gradient-to-br from-trading-dark via-trading-darker to-black;
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-trading-green via-trading-blue to-purple-500;
+}
+
+/* Border & Shadow Effects */
+.trading-border {
+  @apply border border-trading-border/30 transition-colors duration-300;
+}
+
+.trading-shadow {
+  @apply shadow-lg shadow-black/20;
+}
+
+/* Text Effects */
+.trading-text-glow {
+  text-shadow: 0 0 10px rgba(129, 140, 248, 0.3);
+}
+
+/* Status Effects */
+.trading-success-glow {
+  @apply shadow-[0_0_15px_rgba(52,211,153,0.2)];
+}
+
+.trading-warning-glow {
+  @apply shadow-[0_0_15px_rgba(251,191,36,0.2)];
+}
+
+.trading-danger-glow {
+  @apply shadow-[0_0_15px_rgba(239,68,68,0.2)];
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.5s ease-out;
+}
+
+.animate-slideDown {
+  animation: slideDown 0.5s ease-out;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  @apply w-2;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-trading-dark/50 rounded-full;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-trading-border/80 rounded-full hover:bg-trading-border;
+}
+
+/* Card Hover Effects */
+.hover-card-effect {
+  @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/20;
+}
+
+/* Progress Bar Styling */
+.progress-bar-success {
+  background-color: #00ff88;
+}
+
+.progress-bar-warning {
+  background-color: #fbbf24;
+}
+
+.progress-bar-danger {
+  background-color: #ff4757;
+}
+
+/* Performance Optimizations */
 * {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   box-sizing: border-box;
 }
 
-/* Reduce motion for accessibility and performance */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+/* Glassmorphism Effects */
+.glass-effect {
+  @apply bg-trading-dark/50 backdrop-blur-lg border border-trading-border/30;
 }
 
-/* Enhanced glow effects */
-.glow-green {
-  box-shadow: 
-    0 0 10px rgba(var(--trading-green), 0.3),
-    0 0 20px rgba(var(--trading-green), 0.1),
-    0 0 30px rgba(var(--trading-green), 0.05);
+.glass-effect:hover {
+  @apply bg-trading-dark/60 border-trading-green/30;
 }
 
-.glow-red {
-  box-shadow: 
-    0 0 10px rgba(255, 71, 87, 0.3),
-    0 0 20px rgba(255, 71, 87, 0.1),
-    0 0 30px rgba(255, 71, 87, 0.05);
-}
-
-.glow-blue {
-  box-shadow: 
-    0 0 10px rgba(55, 66, 250, 0.3),
-    0 0 20px rgba(55, 66, 250, 0.1),
-    0 0 30px rgba(55, 66, 250, 0.05);
-}
-
-/* Enhanced trading card */
-.trading-card {
-  background: linear-gradient(
-    135deg,
-    rgba(26, 26, 46, 0.95) 0%,
-    rgba(35, 35, 55, 0.9) 50%,
-    rgba(26, 26, 46, 0.95) 100%
-  );
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  /* GPU acceleration */
-  transform: translateZ(0);
-  will-change: transform, border-color, box-shadow;
-  position: relative;
-  overflow: hidden;
-}
-
-.trading-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(var(--trading-green), 0.03),
-    transparent
-  );
-  transition: left 0.5s ease;
-}
-
-.trading-card:hover::before {
-  left: 100%;
-}
-
-.trading-card:hover {
-  border-color: rgba(var(--trading-green), 0.3);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(var(--trading-green), 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transform: translateY(-4px) translateZ(0);
-}
-
-/* Enhanced profit/loss text */
-.profit-text {
-  color: var(--trading-green);
-  text-shadow: 
-    0 0 10px rgba(var(--trading-green), 0.5),
-    0 0 20px rgba(var(--trading-green), 0.2);
-  font-weight: 700;
-}
-
-.loss-text {
-  color: var(--trading-red);
-  text-shadow: 
-    0 0 10px rgba(255, 71, 87, 0.5),
-    0 0 20px rgba(255, 71, 87, 0.2);
-  font-weight: 700;
-}
-
-/* Optimized transitions for frequently updated elements */
+/* Data Display */
 .data-value {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: color, transform;
+  @apply font-mono text-lg font-semibold transition-colors duration-300;
 }
 
-.data-value:hover {
-  transform: scale(1.02);
+.data-label {
+  @apply text-sm text-gray-400;
 }
 
-.progress-bar {
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: width;
-  position: relative;
-  overflow: hidden;
-}
-
-.progress-bar::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.2),
-    transparent
-  );
-  animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-  0% { left: -100%; }
-  100% { left: 100%; }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(26, 26, 46, 0.3);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(
-    180deg,
-    rgba(var(--trading-green), 0.6),
-    rgba(var(--trading-blue), 0.6)
-  );
-  border-radius: 4px;
-  transition: background 0.3s ease;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(
-    180deg,
-    rgba(var(--trading-green), 0.8),
-    rgba(var(--trading-blue), 0.8)
-  );
-}
-
-/* Enhanced pulse animation */
-@keyframes pulse-optimized {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.05);
-  }
-}
-
-.pulse-optimized {
-  animation: pulse-optimized 2s ease-in-out infinite;
-  will-change: opacity, transform;
-}
-
-/* Smooth fade animations */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.fade-in {
-  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.slide-in-up {
-  animation: slideInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-/* Chart container optimizations */
+/* Chart Styling */
 .chart-container {
-  contain: layout style paint;
-  will-change: contents;
-  border-radius: 12px;
-  overflow: hidden;
-  background: linear-gradient(
-    135deg,
-    rgba(26, 26, 46, 0.8) 0%,
-    rgba(35, 35, 55, 0.6) 100%
-  );
+  @apply rounded-lg overflow-hidden bg-trading-dark/50 backdrop-blur-lg border border-trading-border/30;
 }
 
-/* Canvas optimizations */
-canvas {
-  image-rendering: pixelated;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: crisp-edges;
-  border-radius: 8px;
-}
-
-/* Reduce layout thrashing */
-.layout-stable {
-  contain: layout;
-}
-
-/* Enhanced status indicator animations */
-.status-ping {
-  animation: ping-enhanced 2s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-@keyframes ping-enhanced {
-  0% {
-    transform: scale(1);
-    opacity: 1;
+/* Responsive Design */
+@media (max-width: 768px) {
+  .trading-card {
+    @apply p-3;
   }
-  75%, 100% {
-    transform: scale(1.8);
-    opacity: 0;
+  
+  .data-value {
+    @apply text-base;
   }
 }
 
-/* Enhanced gradient text with animation */
-.gradient-text-animated {
-  background: linear-gradient(
-    -45deg,
-    var(--trading-green),
-    var(--trading-blue),
-    var(--trading-purple),
-    var(--trading-green)
-  );
-  background-size: 400% 400%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: gradient-shift 3s ease infinite;
-}
-
-@keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-.animate-gradient {
-  background: linear-gradient(
-    -45deg,
-    var(--trading-green),
-    var(--trading-blue),
-    var(--trading-purple),
-    var(--trading-green)
-  );
-  background-size: 400% 400%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: gradient-shift 4s ease infinite;
-}
-
-/* Prevent flash of unstyled content */
-.prevent-flash {
-  visibility: hidden;
-}
-
-.prevent-flash.loaded {
-  visibility: visible;
-  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Enhanced skeleton loader */
-@keyframes skeleton-loading {
-  0% {
-    background-position: -200px 0;
+/* Dark Mode Enhancements */
+@media (prefers-color-scheme: dark) {
+  .glass-effect {
+    @apply bg-black/40;
   }
-  100% {
-    background-position: calc(200px + 100%) 0;
+  
+  .trading-border {
+    @apply border-trading-border/20;
   }
 }
 
-.animate-pulse {
-  background: linear-gradient(
-    90deg,
-    rgba(75, 85, 99, 0.3) 25%,
-    rgba(75, 85, 99, 0.5) 50%,
-    rgba(75, 85, 99, 0.3) 75%
-  );
-  background-size: 200px 100%;
-  animation: skeleton-loading 1.5s infinite;
-}
-
-/* Enhanced hover effects for interactive elements */
-.hover-lift {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.hover-lift:hover {
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-}
-
-/* Floating animation for accent elements */
-@keyframes float {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
-/* Enhanced connection status indicator */
-.connection-indicator {
-  position: relative;
-  overflow: hidden;
-}
-
-.connection-indicator::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.2),
-    transparent
-  );
-  transition: left 0.5s ease;
-}
-
-.connection-indicator.connected::after {
-  animation: sweep 2s ease infinite;
-}
-
-@keyframes sweep {
-  0% { left: -100%; }
-  100% { left: 100%; }
-}
-
-/* Enhanced number transitions */
-.number-transition {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  display: inline-block;
-}
-
-.number-transition.changed {
-  animation: number-pop 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes number-pop {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); }
-}
-
-/* Glass morphism effect */
-.glass-morphism {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-/* Enhanced loading states */
+/* Loading States */
 .loading-shimmer {
-  background: linear-gradient(
-    90deg,
-    rgba(55, 65, 81, 0.3) 0%,
-    rgba(75, 85, 99, 0.5) 50%,
-    rgba(55, 65, 81, 0.3) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  @apply animate-pulse bg-trading-border/20 rounded;
 }
 
-/* Smooth page transitions */
-.page-transition {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Enhanced focus states for accessibility */
+/* Focus States */
 *:focus {
-  outline: 2px solid var(--trading-blue);
-  outline-offset: 2px;
-  border-radius: 4px;
+  @apply outline-none ring-2 ring-trading-green/30;
 }
 
-/* Improved button hover states */
+/* Interactive Elements */
 button, .clickable {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  cursor: pointer;
+  @apply transition-all duration-300;
 }
 
 button:hover, .clickable:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  @apply brightness-110;
 }
 
 button:active, .clickable:active {
-  transform: translateY(0);
-  transition: transform 0.1s;
+  @apply brightness-90 scale-95;
 }
 
-/* Enhanced grid animations */
-.grid-item {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Dark theme overrides for components that use light backgrounds */
+.bg-white, .bg-gray-50, .bg-green-50, .bg-red-50, .bg-amber-50, .bg-yellow-50 {
+  @apply bg-trading-card/40 backdrop-blur-lg border border-trading-border/30;
 }
 
-.grid-item:nth-child(1) { animation-delay: 0.1s; }
-.grid-item:nth-child(2) { animation-delay: 0.2s; }
-.grid-item:nth-child(3) { animation-delay: 0.3s; }
-.grid-item:nth-child(4) { animation-delay: 0.4s; }
-.grid-item:nth-child(5) { animation-delay: 0.5s; }
-.grid-item:nth-child(6) { animation-delay: 0.6s; }
-
-/* Performance optimizations for mobile */
-@media (max-width: 768px) {
-  .trading-card {
-    backdrop-filter: blur(10px);
-  }
-  
-  .animate-gradient {
-    animation: none;
-    background: var(--trading-green);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
+.text-gray-900 {
+  @apply text-trading-gray-100;
 }
 
-/* Dark mode enhancements */
-@media (prefers-color-scheme: dark) {
-  .trading-card {
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-  
-  .glass-morphism {
-    background: rgba(0, 0, 0, 0.2);
-  }
+.text-gray-600 {
+  @apply text-trading-gray-400;
 }

@@ -81,6 +81,47 @@ const io = socketIo(server, {
   }
 })
 
+// Listen for dashboard connections to receive live settings
+io.on('connection', (dashboardSocket) => {
+  logger.info('📊 Dashboard connected', { id: dashboardSocket.id })
+
+  dashboardSocket.on('update_settings', (settings, ack) => {
+    if (typeof settings.minConfidence === 'number') {
+      runtimeSettings.execThreshold = settings.minConfidence
+      logger.info('⚙️ execThreshold updated via dashboard', { execThreshold: runtimeSettings.execThreshold })
+    }
+    if (typeof ack === 'function') {
+      ack({ success: true, execThreshold: runtimeSettings.execThreshold })
+    }
+  })
+
+  dashboardSocket.on('disconnect', () => {
+    logger.info('📊 Dashboard disconnected', { id: dashboardSocket.id })
+  })
+
+  dashboardSocket.on('manual_trade', (payload, ack) => {
+    const cmd = {
+      type: 'command',
+      timestamp: new Date().toISOString(),
+      instrument: payload.instrument || 'SIM',
+      command: payload.command,
+      quantity: payload.quantity || 1,
+      reason: 'Manual test from dashboard'
+    }
+    
+    // Use broadcastToNinja to send to connected NinjaTrader instances
+    const sent = broadcastToNinja(cmd)
+    
+    if (sent > 0) {
+      logger.info('📤 Manual trade sent', { ...cmd, sentTo: sent })
+    } else {
+      logger.warn('⚠️ Manual trade queued but no NinjaTrader connected', cmd)
+    }
+    
+    if (typeof ack === 'function') ack({ success: sent > 0 })
+  })
+})
+
 // Redis for caching and pub/sub (optional)
 let redisClient = null
 try {
@@ -2430,17 +2471,17 @@ async function handleStrategyStatus(data) {
       lastNinjaTraderData = new Date()
     }
     
-  // Update connection state
-  if (!strategyState.ninjaTraderConnected) {
-    strategyState.ninjaTraderConnected = true
-    strategyState.isActive = true
-    strategyState.startTime = new Date()
-    broadcastConnectionStatus('connected')
+    // Update connection state
+    if (!strategyState.ninjaTraderConnected) {
+      strategyState.ninjaTraderConnected = true
+      strategyState.isActive = true
+      strategyState.startTime = new Date()
+      broadcastConnectionStatus('connected')
       logger.info('✅ NinjaTrader strategy connected and active')
-  }
-  
-  strategyState.lastHeartbeat = new Date()
-  
+    }
+    
+    strategyState.lastHeartbeat = new Date()
+    
     // Normalize position data format
     const normalizedPosition = normalizePosition(data.position);
     
@@ -2452,11 +2493,17 @@ async function handleStrategyStatus(data) {
         avgPrice: data.entry_price || 0
       });
     }
-  
+    
     // Enhanced ML prediction integration
     let mlEnhancedData = { 
       ...data, 
-      position: normalizedPosition // Use normalized position
+      position: normalizedPosition, // Use normalized position
+      atr: data.atr || latestStrategyData.atr || 1.0 // Preserve ATR from previous data if not in current message
+    }
+    
+    // Calculate ATR percentage of price for volatility context
+    if (mlEnhancedData.atr && mlEnhancedData.price) {
+      mlEnhancedData.atr_percentage = (mlEnhancedData.atr / mlEnhancedData.price) * 100
     }
     
     // **CRITICAL FIX: Properly map trade levels from NinjaTrader**
@@ -2494,7 +2541,7 @@ async function handleStrategyStatus(data) {
           price: data.price,
           rsi: data.rsi,
           ema_alignment: data.ema_alignment_score,
-          atr: data.atr || 1.0,
+          atr: mlEnhancedData.atr, // Use preserved ATR value
           adx: data.adx || 25,
           volume: data.volume || 1000,
           bid: data.bid || data.price - 0.25,
@@ -2510,7 +2557,8 @@ async function handleStrategyStatus(data) {
           ml_confidence_level: mlPrediction.confidence || 0.5,
           ml_volatility_prediction: mlPrediction.volatility || 0.5,
           ml_market_regime: mlPrediction.marketRegime || 'unknown',
-          ml_trade_recommendation: mlPrediction.direction || 'neutral'
+          ml_trade_recommendation: mlPrediction.direction || 'neutral',
+          volatility_state: getVolatilityState(mlEnhancedData.atr, mlEnhancedData.price) // Add volatility state based on ATR
         }
         
       } catch (mlError) {
@@ -2532,32 +2580,27 @@ async function handleStrategyStatus(data) {
     }
     
     // Update strategy data with enhanced information
-  latestStrategyData = {
-    ...latestStrategyData,
+    latestStrategyData = {
+      ...latestStrategyData,
       ...mlEnhancedData,
       timestamp: new Date().toISOString(),
       connection_quality: 'excellent',
       data_source: 'ninjatrader_strategy'
     }
     
-    // Broadcast enhanced data to all connected dashboard clients
-    io.emit('strategy_data', mlEnhancedData)
+    // Emit status update (separate from market data)
+    io.emit('strategy_status', latestStrategyData)
+    
+    // Trigger trade evaluation
+    if (ninjaTraderConnection && ninjaTraderConnection.socket) {
+      await evaluateAndSendTradingCommand(mlEnhancedData, ninjaTraderConnection.socket)
+    }
     
   } catch (error) {
     logger.error('❌ Error handling strategy status', { 
       error: error.message,
       instrument: data?.instrument || 'unknown'
     })
-    
-    // Send basic data even if enhancement fails
-    const basicData = {
-      ...data,
-      timestamp: new Date().toISOString(),
-      data_source: 'ninjatrader_strategy_basic'
-    }
-    
-    latestStrategyData = basicData
-    io.emit('strategy_data', basicData)
   }
 }
 
@@ -2628,6 +2671,9 @@ async function handleMarketData(data) {
       data_source: 'market_feed'
     }
     
+    // Single emission to all clients
+    io.emit('market_data', marketData);
+    
     // Store for ML analysis if needed
     if (redisClient) {
       try {
@@ -2638,14 +2684,9 @@ async function handleMarketData(data) {
       }
     }
     
-    // Broadcast to connected clients
-    connectedClients.forEach(client => {
-      client.emit('market_data', marketData)
-    })
-    
-      } catch (error) {
+  } catch (error) {
     logger.error('❌ Error handling market data', { error: error.message })
-    }
+  }
 }
 
 async function handleTradeExecution(data) {
@@ -5156,4 +5197,108 @@ class TrailingAlgorithmSuite {
         
         return (rsiMomentum + emaMomentum) / 2;
     }
+}
+
+// [ML SERVER REFACTOR START]
+// 1. Implement all signal logic using NinjaTrader data
+// 2. Output trading commands in standardized JSON format
+// 3. Add state tracking if needed
+// 4. Implement heartbeat/connection monitoring
+// 5. Add error handling and logging
+// 6. Document command/data message schemas
+
+// --- SIGNAL LOGIC & COMMAND OUTPUT ---
+// Example: Generate and send trading commands based on ML model output
+async function evaluateAndSendTradingCommand(marketData, socket) {
+  try {
+    const prediction = await predictionService.generatePrediction(marketData);
+    const threshold = runtimeSettings.execThreshold ?? 0.7
+    let command = null;
+    if (prediction.direction === 'LONG' && prediction.confidence > threshold) {
+      command = {
+        type: 'command',
+        timestamp: new Date().toISOString(),
+        instrument: marketData.instrument,
+        command: 'go_long',
+        quantity: 1,
+        price: marketData.price,
+        stop_loss: marketData.price - (marketData.atr || 10),
+        target: marketData.price + (marketData.atr || 10),
+        reason: `ML model long (conf ${(prediction.confidence*100).toFixed(1)}% > ${(threshold*100).toFixed(0)}%)`
+      };
+    } else if (prediction.direction === 'SHORT' && prediction.confidence > threshold) {
+      command = {
+        type: 'command',
+        timestamp: new Date().toISOString(),
+        instrument: marketData.instrument,
+        command: 'go_short',
+        quantity: 1,
+        price: marketData.price,
+        stop_loss: marketData.price + (marketData.atr || 10),
+        target: marketData.price - (marketData.atr || 10),
+        reason: `ML model short (conf ${(prediction.confidence*100).toFixed(1)}% > ${(threshold*100).toFixed(0)}%)`
+      };
+    } else if (prediction.direction === 'NEUTRAL' || prediction.confidence <= threshold) {
+      command = {
+        type: 'command',
+        timestamp: new Date().toISOString(),
+        instrument: marketData.instrument,
+        command: 'close_position',
+        reason: 'ML model neutral or low confidence'
+      };
+    }
+    if (command && socket && socket.write) {
+      socket.write(JSON.stringify(command) + '\n');
+      logger.info('📤 Trading command sent to NinjaTrader', command);
+    }
+  } catch (error) {
+    logger.error('❌ Error in evaluateAndSendTradingCommand', { error: error.message });
+  }
+}
+
+// --- HEARTBEAT/CONNECTION MONITORING ---
+// Heartbeat message handler
+function handleHeartbeat(data, socket) {
+  try {
+    logger.debug('💓 Heartbeat received', { instrument: data.instrument, timestamp: data.timestamp });
+    // Update last seen timestamp for this instrument
+    if (data.instrument) {
+      if (!strategyState.heartbeats) strategyState.heartbeats = {};
+      strategyState.heartbeats[data.instrument] = new Date();
+    }
+    // Respond with heartbeat
+    if (socket && socket.write) {
+      socket.write(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }) + '\n');
+    }
+  } catch (error) {
+    logger.error('❌ Error handling heartbeat', { error: error.message });
+  }
+}
+
+// --- DATA/COMMAND SCHEMA DOCUMENTATION ---
+/**
+ * Trading Command JSON Schema Example:
+ * {
+ *   "type": "command",
+ *   "timestamp": "2024-06-10T15:30:00.000Z",
+ *   "instrument": "ES 09-24",
+ *   "command": "go_long", // or "go_short", "close_position", etc.
+ *   "quantity": 2,
+ *   "price": 5325.75,
+ *   "stop_loss": 5320.00,
+ *   "target": 5335.00,
+ *   "reason": "ML model signal: high probability long"
+ * }
+ */
+
+// --- INTEGRATION INTO DATA FLOW ---
+// Call evaluateAndSendTradingCommand after ML prediction or strategy status update
+// Example integration in handleStrategyStatus or handleMLPredictionRequest:
+// await evaluateAndSendTradingCommand(data, socket);
+// ... existing code ...
+// [ML SERVER REFACTOR END]
+
+// Runtime adjustable settings received from dashboard
+const runtimeSettings = {
+  execThreshold: parseFloat(process.env.EXEC_THRESHOLD || '0.7')
 }

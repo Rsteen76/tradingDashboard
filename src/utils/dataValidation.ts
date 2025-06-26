@@ -5,6 +5,7 @@ export interface StrategyData {
   signal_strength?: number
   ml_probability?: number
   rsi?: number
+  atr?: number
   ema_alignment?: number
   pnl?: number
   position?: string
@@ -58,8 +59,8 @@ export function clampProbability(value: any): number {
   return Math.max(0, Math.min(1, value))
 }
 
-export function clampRSI(value: any): number {
-  if (!isValidNumber(value)) return 50
+export function clampRSI(value: any): number | undefined {
+  if (!isValidNumber(value)) return undefined
   return Math.max(0, Math.min(100, value))
 }
 
@@ -137,7 +138,8 @@ export function validateStrategyData(data: any): StrategyData {
     price: validatePrice(data.price || data.current_price),
     signal_strength: clampPercentage(data.signal_strength),
     ml_probability: clampProbability(data.ml_probability),
-    rsi: clampRSI(data.rsi),
+    rsi: clampRSI(data.rsi || data.rsi_current),
+    atr: isValidNumber(data.atr) ? Math.max(0, data.atr) : undefined,
     ema_alignment: clampPercentage(data.ema_alignment),
     pnl: validatePnL(data.pnl || data.unrealized_pnl),
     position: validatePosition(data.position),
