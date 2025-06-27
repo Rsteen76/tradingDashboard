@@ -1,0 +1,23 @@
+{
+  "completedTrades": [],
+  "statistics": {
+    "byHour": {},
+    "byDay": {},
+    "byPattern": {},
+    "byConfidence": {},
+    "byMarketRegime": {},
+    "overall": {
+      "totalTrades": 0,
+      "winRate": 0,
+      "avgWin": 0,
+      "avgLoss": 0,
+      "profitFactor": 0,
+      "expectancy": 0,
+      "sharpeRatio": 0,
+      "maxDrawdown": 0
+    }
+  },
+  "successPatterns": [],
+  "failurePatterns": [],
+  "lastSaved": "2025-06-27T18:07:18.356Z"
+}

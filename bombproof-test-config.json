@@ -1,0 +1,33 @@
+{
+  "paperMode": true,
+  "autoTradingEnabled": false,
+  "minConfidence": 0.75,
+  "maxDailyLoss": 1000,
+  "maxConsecutiveLosses": 3,
+  "maxPositionSize": 1,
+  "bombproofSettings": {
+    "riskManagement": {
+      "maxDailyTrades": 10,
+      "maxDailyLoss": -1000,
+      "maxConsecutiveLosses": 3,
+      "maxTotalExposure": 50000
+    },
+    "confidenceThresholds": {
+      "base": 0.75,
+      "min": 0.6,
+      "max": 0.9,
+      "adjustmentRate": 0.01
+    },
+    "validation": {
+      "minExpectedProfit": 25,
+      "minRiskRewardRatio": 1.5,
+      "maxVolatility": 0.03,
+      "restrictedHours": [20, 21, 22, 23, 0, 1, 2, 3, 4, 5]
+    },
+    "monitoring": {
+      "tradeMonitoringInterval": 5000,
+      "performanceReviewInterval": 900000,
+      "modelUpdateInterval": 3600000
+    }
+  }
+} 
