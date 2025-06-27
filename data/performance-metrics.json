@@ -1,0 +1,1030 @@
+{
+  "metrics": {
+    "models": {
+      "lstm": {
+        "predictions": 0,
+        "correct": 0,
+        "accuracy": 0,
+        "lastUpdate": null
+      },
+      "transformer": {
+        "predictions": 0,
+        "correct": 0,
+        "accuracy": 0,
+        "lastUpdate": null
+      },
+      "randomForest": {
+        "predictions": 0,
+        "correct": 0,
+        "accuracy": 0,
+        "lastUpdate": null
+      },
+      "advancedAI": {
+        "predictions": 0,
+        "correct": 0,
+        "accuracy": 0,
+        "lastUpdate": null
+      },
+      "ensemble": {
+        "predictions": 0,
+        "correct": 0,
+        "accuracy": 0,
+        "lastUpdate": null
+      }
+    },
+    "trading": {
+      "dailyPnL": 0,
+      "weeklyPnL": 0,
+      "monthlyPnL": 0,
+      "winRate": 0,
+      "profitFactor": 0,
+      "sharpeRatio": 0,
+      "maxDrawdown": 0,
+      "currentDrawdown": 0,
+      "consecutiveWins": 0,
+      "consecutiveLosses": 0
+    },
+    "risk": {
+      "positionsOpen": 0,
+      "totalExposure": 0,
+      "marginUsed": 0,
+      "riskScore": 0,
+      "dailyVaR": 0,
+      "stressTestResult": 0
+    },
+    "health": {
+      "uptime": 0,
+      "lastHeartbeat": null,
+      "cpuUsage": 14.827,
+      "memoryUsage": 0.6296563898017232,
+      "tensorflowMemory": 0,
+      "apiLatency": 0,
+      "predictionLatency": 0,
+      "ninjaConnection": false,
+      "score": 0.8
+    },
+    "learning": {
+      "totalTradesAnalyzed": 0,
+      "patternsIdentified": 0,
+      "modelUpdates": 0,
+      "lastModelUpdate": null,
+      "adaptationRate": 0,
+      "learningEfficiency": 0
+    }
+  },
+  "performanceHistory": {
+    "pnl": [
+      {
+        "timestamp": "2025-06-27T14:01:05.215Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:10.229Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:15.236Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:20.244Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:25.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:30.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:35.255Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:40.258Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:45.271Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:50.278Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:55.280Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:00.283Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:05.285Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:10.302Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:15.317Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:20.325Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:25.331Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:30.345Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:35.356Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:40.363Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:45.370Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:50.380Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:55.392Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:00.395Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:05.405Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:10.410Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:15.420Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:20.424Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:25.439Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:30.453Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:35.454Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:40.467Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:45.479Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:50.493Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:55.494Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:00.497Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:05.511Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:10.524Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:15.535Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:20.550Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:25.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:30.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:35.557Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:40.565Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:45.578Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:50.584Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:55.590Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:00.595Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:05.606Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:10.608Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:15.620Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:20.621Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:25.629Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:30.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:35.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:40.638Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:45.644Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:50.651Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:55.655Z",
+        "value": 0
+      }
+    ],
+    "winRate": [
+      {
+        "timestamp": "2025-06-27T14:01:05.215Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:10.229Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:15.236Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:20.244Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:25.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:30.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:35.255Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:40.258Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:45.271Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:50.278Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:55.280Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:00.283Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:05.285Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:10.302Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:15.317Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:20.325Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:25.331Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:30.345Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:35.356Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:40.363Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:45.370Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:50.380Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:55.392Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:00.395Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:05.405Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:10.410Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:15.420Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:20.424Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:25.439Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:30.453Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:35.454Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:40.467Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:45.479Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:50.493Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:55.494Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:00.497Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:05.511Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:10.524Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:15.535Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:20.550Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:25.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:30.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:35.557Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:40.565Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:45.578Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:50.584Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:55.590Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:00.595Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:05.606Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:10.608Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:15.620Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:20.621Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:25.629Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:30.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:35.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:40.638Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:45.644Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:50.651Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:55.655Z",
+        "value": 0
+      }
+    ],
+    "accuracy": [
+      {
+        "timestamp": "2025-06-27T14:01:05.215Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:10.229Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:15.236Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:20.244Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:25.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:30.248Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:35.255Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:40.258Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:45.271Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:50.278Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:01:55.280Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:00.283Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:05.285Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:10.302Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:15.317Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:20.325Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:25.331Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:30.345Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:35.356Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:40.363Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:45.370Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:50.380Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:02:55.392Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:00.395Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:05.405Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:10.410Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:15.420Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:20.424Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:25.439Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:30.453Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:35.454Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:40.467Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:45.479Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:50.493Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:03:55.494Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:00.497Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:05.511Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:10.524Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:15.535Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:20.550Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:25.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:30.556Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:35.557Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:40.565Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:45.578Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:50.584Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:04:55.590Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:00.595Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:05.606Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:10.608Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:15.620Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:20.621Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:25.629Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:30.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:35.635Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:40.638Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:45.644Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:50.651Z",
+        "value": 0
+      },
+      {
+        "timestamp": "2025-06-27T14:05:55.655Z",
+        "value": 0
+      }
+    ],
+    "health": [
+      {
+        "timestamp": "2025-06-27T14:01:05.215Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:10.229Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:15.236Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:20.244Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:25.248Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:30.248Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:35.255Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:40.258Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:45.271Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:50.278Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:01:55.280Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:00.283Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:05.285Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:10.302Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:15.317Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:20.325Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:25.331Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:30.345Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:35.356Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:40.363Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:45.370Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:50.380Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:02:55.392Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:00.395Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:05.405Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:10.410Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:15.420Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:20.424Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:25.439Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:30.453Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:35.454Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:40.467Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:45.479Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:50.493Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:03:55.494Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:00.497Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:05.511Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:10.524Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:15.535Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:20.550Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:25.556Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:30.556Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:35.557Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:40.565Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:45.578Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:50.584Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:04:55.590Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:00.595Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:05.606Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:10.608Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:15.620Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:20.621Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:25.629Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:30.635Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:35.635Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:40.638Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:45.644Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:50.651Z",
+        "value": 0.8
+      },
+      {
+        "timestamp": "2025-06-27T14:05:55.655Z",
+        "value": 0.8
+      }
+    ]
+  },
+  "lastSaved": "2025-06-27T14:06:00.214Z"
+}

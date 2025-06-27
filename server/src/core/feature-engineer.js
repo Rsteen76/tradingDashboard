@@ -15,14 +15,42 @@ class FeatureEngineer {
     this.processingBatch = false;
     this.lastCleanup = Date.now();
     this.cleanupInterval = 10 * 60 * 1000; // 10 minutes
-    logger.info('✅ FeatureEngineer initialized with comprehensive feature extraction');
+    logger.info('✅ FeatureEngineer constructed with comprehensive feature extraction');
   }
 
-  // Batch processing for performance
+  async initialize() {
+    try {
+      // Initialize scalers with default values
+      this.scalers.set('price', { mean: 0, std: 1 });
+      this.scalers.set('volume', { mean: 0, std: 1 });
+      this.scalers.set('rsi', { mean: 50, std: 20 });
+      this.scalers.set('macd', { mean: 0, std: 1 });
+      
+      // Start cleanup interval
+      setInterval(() => this.cleanup(), this.cleanupInterval);
+      
+      logger.info('✅ FeatureEngineer initialized successfully');
+      return true;
+    } catch (error) {
+      logger.error('Failed to initialize FeatureEngineer:', error);
+      throw error;
+    }
+  }
+
   async extractFeaturesAsync(marketData, lookback = 60) {
     return new Promise((resolve, reject) => {
-      this.pendingFeatures.push({ marketData, lookback, resolve, reject });
-      this.processBatch();
+      // Add to pending batch
+      this.pendingFeatures.push({
+        marketData,
+        lookback,
+        resolve,
+        reject
+      });
+      
+      // Start processing if not already running
+      if (!this.processingBatch) {
+        setImmediate(() => this.processBatch());
+      }
     });
   }
 
@@ -298,14 +326,35 @@ class FeatureEngineer {
   }
 
   normalizeFeatures(features) {
-    // Z-score normalization with clipping
-    return features.map(f => {
-      // Handle NaN and infinite values
-      if (isNaN(f) || !isFinite(f)) return 0
+    const normalized = {}
+    
+    for (const [key, value] of Object.entries(features)) {
+      const scaler = this.scalers.get(key) || { mean: 0, std: 1 }
+      normalized[key] = (value - scaler.mean) / scaler.std
+    }
+    
+    return normalized
+  }
+
+  // Add enrichData method for market data enrichment
+  async enrichData(marketData) {
+    try {
+      if (!marketData) {
+        throw new Error('Market data is required for enrichment');
+      }
+
+      // Extract all features asynchronously
+      const enrichedFeatures = await this.extractFeaturesAsync(marketData);
       
-      const normalized = (f - 0) / 1 // Simplified, should use actual mean/std
-      return Math.max(-3, Math.min(3, normalized)) // Clip to [-3, 3]
-    })
+      // Combine original market data with enriched features
+      return {
+        ...marketData,
+        enrichedFeatures
+      };
+    } catch (error) {
+      logger.error('Failed to enrich market data:', error);
+      throw error;
+    }
   }
 }
 

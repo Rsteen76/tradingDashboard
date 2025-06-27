@@ -1,5 +1,5 @@
 // server/src/services/ninja-trader-service.js
-// Extracted from your ml-server.backup.js TCP server logic
+// Updated to automatically accept NinjaTrader connections
 
 const net = require('net');
 const EventEmitter = require('events');
@@ -14,7 +14,7 @@ class NinjaTraderService extends EventEmitter {
     this.server = null;
     this.connections = new Map();
     
-    // Connection state tracking (from your existing code)
+    // Connection state tracking
     this.connectionState = {
       isConnected: false,
       lastHeartbeat: null,
@@ -22,12 +22,12 @@ class NinjaTraderService extends EventEmitter {
     };
     
     this.heartbeatInterval = null;
+    this.autoAcceptConnections = true; // NEW: Auto-accept connections
   }
 
   async start() {
     return new Promise((resolve, reject) => {
       try {
-        // Create TCP server (from your existing createNinjaTraderServer function)
         this.server = net.createServer((socket) => {
           this.handleConnection(socket);
         });
@@ -60,12 +60,31 @@ class NinjaTraderService extends EventEmitter {
     this.connectionState.isConnected = true;
     this.emit('connected', { clientId });
     
-    // Socket configuration (from your existing code)
+    // Socket configuration
     socket.setEncoding('utf8');
     socket.setTimeout(300000); // 5 minute timeout
     
     let buffer = '';
     let strategyDataReceived = false;
+    
+    // NEW: Auto-accept the connection if enabled
+    if (this.autoAcceptConnections) {
+      strategyDataReceived = true;
+      logger.info('✅ Strategy auto-accepted!', { 
+        clientId,
+        autoAccept: true
+      });
+      this.emit('strategyConfirmed', { 
+        clientId, 
+        data: { 
+          type: 'auto_accepted',
+          timestamp: new Date().toISOString()
+        } 
+      });
+      
+      // Request initial status from NinjaTrader
+      this.requestStrategyStatus(socket);
+    }
     
     socket.on('data', (data) => {
       try {
@@ -76,7 +95,7 @@ class NinjaTraderService extends EventEmitter {
           preview: data.toString().substring(0, 200)
         });
         
-        // Process complete JSON messages (from your existing logic)
+        // Process complete JSON messages
         let lines = buffer.split('\n');
         buffer = lines.pop() || '';
         
@@ -131,8 +150,8 @@ class NinjaTraderService extends EventEmitter {
         instrument: jsonData.instrument 
       });
       
-      // Handle strategy confirmation (from your existing logic)
-      if (!strategyDataReceived && this.isStrategyConfirmationMessage(jsonData)) {
+      // Handle strategy confirmation (only if not auto-accepted)
+      if (!this.autoAcceptConnections && !strategyDataReceived && this.isStrategyConfirmationMessage(jsonData)) {
         strategyDataReceived = true;
         logger.info('✅ Strategy confirmed active!', { 
           type: jsonData.type,
@@ -141,7 +160,7 @@ class NinjaTraderService extends EventEmitter {
         this.emit('strategyConfirmed', { clientId, data: jsonData });
       }
       
-      // Emit events based on message type (from your existing switch statement)
+      // Emit events based on message type
       switch (jsonData.type) {
         case 'instrument_registration':
           this.emit('instrumentRegistration', jsonData);
@@ -196,8 +215,25 @@ class NinjaTraderService extends EventEmitter {
     }
   }
 
+  // NEW: Request strategy status from NinjaTrader
+  requestStrategyStatus(socket) {
+    try {
+      const request = {
+        type: 'request_strategy_status',
+        timestamp: new Date().toISOString()
+      };
+      
+      if (socket && socket.writable) {
+        socket.write(JSON.stringify(request) + '\n');
+        logger.info('📤 Requested strategy status from NinjaTrader');
+      }
+    } catch (error) {
+      logger.error('❌ Error requesting strategy status:', { error: error.message });
+    }
+  }
+
   isStrategyConfirmationMessage(jsonData) {
-    // From your existing logic - these message types confirm strategy is active
+    // These message types confirm strategy is active
     return ['instrument_registration', 'tick_data', 'strategy_status'].includes(jsonData.type);
   }
 
@@ -208,7 +244,7 @@ class NinjaTraderService extends EventEmitter {
         timestamp: data.timestamp 
       });
       
-      // Respond with heartbeat (from your existing logic)
+      // Respond with heartbeat
       if (socket && socket.writable) {
         socket.write(JSON.stringify({ 
           type: 'heartbeat', 
@@ -220,7 +256,7 @@ class NinjaTraderService extends EventEmitter {
     }
   }
 
-  // Broadcast to all connections (from your existing broadcastToNinja function)
+  // Broadcast to all connections
   broadcast(data) {
     const message = JSON.stringify(data) + '\n';
     let sent = 0;
@@ -269,7 +305,7 @@ class NinjaTraderService extends EventEmitter {
     return false;
   }
 
-  // Heartbeat monitoring (from your existing heartbeat logic)
+  // Heartbeat monitoring
   startHeartbeatMonitoring() {
     this.heartbeatInterval = setInterval(() => {
       if (this.connectionState.isConnected && this.connectionState.lastHeartbeat) {
@@ -281,6 +317,12 @@ class NinjaTraderService extends EventEmitter {
         }
       }
     }, this.config.heartbeatInterval);
+  }
+
+  // NEW: Method to toggle auto-accept
+  setAutoAccept(enabled) {
+    this.autoAcceptConnections = enabled;
+    logger.info(`🔧 Auto-accept connections: ${enabled ? 'ENABLED' : 'DISABLED'}`);
   }
 
   async stop() {
@@ -318,7 +360,7 @@ class NinjaTraderService extends EventEmitter {
     }
   }
 
-  // Getters for status (from your existing code)
+  // Getters for status
   get isConnected() {
     return this.connectionState.isConnected;
   }
@@ -331,7 +373,7 @@ class NinjaTraderService extends EventEmitter {
     return this.connectionState.lastHeartbeat;
   }
 
-  // Method to send trading commands (from your existing logic)
+  // Method to send trading commands
   sendTradingCommand(command) {
     const sent = this.broadcast({
       type: 'command',

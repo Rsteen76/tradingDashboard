@@ -6,6 +6,7 @@ require('@tensorflow/tfjs-backend-cpu');
 const { LRUCache } = require('lru-cache');
 const fsExtra = require('fs-extra');
 const path = require('path');
+const { EventEmitter } = require('events');
 
 const logger = require('../utils/logger');
 const config = require('../utils/config');
@@ -17,8 +18,9 @@ const SmartTrailingManager = require('./smart-trailing');
 const PatternRecognition = require('./pattern-recognition');
 const { DataValidator } = require('../utils/data-validator');
 
-class MLEngine {
+class MLEngine extends EventEmitter {
   constructor(options = {}) {
+    super(); // Initialize EventEmitter
     this.config = { ...config.ml, ...options };
     
     // Core ML components (from your existing code)
@@ -186,6 +188,8 @@ class MLEngine {
         finalPrediction.direction, 
         finalPrediction.confidence
       );
+      
+      this.emit('predictionGenerated', finalPrediction);
       
       return finalPrediction;
       

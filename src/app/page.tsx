@@ -6,6 +6,8 @@ import { useSocket, RiskManagement, StrategyStatus, MarketData } from '@/hooks/u
 import SettingsPanel, { Settings } from '@/components/SettingsPanel'
 import Toast from '@/components/Toast'
 import TradeDecisionPanel from '@/components/TradeDecisionPanel'
+import EnhancedPerformancePanel from '@/components/EnhancedPerformancePanel'
+import TradeOutcomePanel from '@/components/TradeOutcomePanel'
 
 
 
@@ -909,6 +911,15 @@ const TradingDashboard = () => {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Enhanced Analytics Section */}
+        <div className="grid grid-cols-2 gap-6">
+          {/* Enhanced Performance Panel */}
+          <EnhancedPerformancePanel className="col-span-1" />
+          
+          {/* Trade Outcome Panel */}
+          <TradeOutcomePanel className="col-span-1" />
         </div>
 
         {/* Bottom Status Bar */}

@@ -195,6 +195,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 				
 				// Send initial connection handshake with instrument info
 				SendInstrumentRegistration();
+				
+				// Send initial strategy status to confirm the strategy is active
+				Task.Delay(100).ContinueWith(_ => 
+				{
+					SendInitialStrategyStatus();
+				});
 			}
 			catch (Exception ex)
 			{
@@ -286,6 +292,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 					else if (messageType == "smart_trailing_response")
 					{
 						ProcessSmartTrailingResponse(response);
+					}
+					else if (messageType == "request_strategy_status")
+					{
+						// Server is requesting current strategy status
+						Print("📡 Server requested strategy status - sending update");
+						SendStrategyStatusToML();
 					}
 				}
 			}
@@ -764,6 +776,41 @@ namespace NinjaTrader.NinjaScript.Strategies
 				DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
 			EnqueueMLMessage(json);
 			Print($"📡 Registered instrument {instrumentName} with dashboard");
+		}
+
+		private void SendInitialStrategyStatus()
+		{
+			try
+			{
+				if (!mlConnected)
+					return;
+
+				lock (dictLock)
+				{
+					reusableDataDict.Clear();
+					reusableDataDict["strategy_name"] = "ScalperProWithML";
+					reusableDataDict["is_active"] = true;
+					reusableDataDict["instrument"] = instrumentName;
+					reusableDataDict["account"] = Account?.Name ?? "Unknown";
+					reusableDataDict["position"] = Position?.MarketPosition.ToString() ?? "Flat";
+					reusableDataDict["position_size"] = Position?.Quantity ?? 0;
+					reusableDataDict["unrealized_pnl"] = Position?.GetUnrealizedProfitLoss(PerformanceUnit.Currency) ?? 0.0;
+					reusableDataDict["average_price"] = Position?.AveragePrice ?? 0.0;
+					reusableDataDict["current_price"] = Close?.Count > 0 ? Close[0] : 0.0;
+					reusableDataDict["connection_time"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+					reusableDataDict["trading_disabled"] = tradingDisabled;
+					reusableDataDict["strategy_instance_id"] = strategyInstanceId;
+				}
+
+				string json = CreateOptimizedJsonString("strategy_status", instrumentName, 
+					DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), reusableDataDict);
+				EnqueueMLMessage(json);
+				Print($"✅ Sent initial strategy status to ML server");
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error sending initial strategy status: {ex.Message}");
+			}
 		}
 
 		private void SendToMLDashboard(string jsonData)
@@ -2692,6 +2739,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 				if (EnableMLDashboard && !mlConnected)
 				{
 					ConnectToMLDashboard();
+				}
+				
+				// Send strategy status when going live
+				if (EnableMLDashboard && mlConnected)
+				{
+					SendInitialStrategyStatus();
 				}
 			}
 			else if (State == State.Terminated)
