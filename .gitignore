@@ -81,3 +81,5 @@ models/
 
 # Redis data
 dump.rdb
+
+src/components/anthropic-api.txt
