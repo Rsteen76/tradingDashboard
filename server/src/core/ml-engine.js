@@ -30,10 +30,31 @@ class MLEngine {
     
     // Runtime settings (from your existing runtimeSettings)
     this.runtimeSettings = {
-      execThreshold: this.config.execThreshold,
-      autoTradingEnabled: this.config.autoTradingEnabled,
-      rateLimitMs: 5000,
-      validationRequired: true
+      minConfidence: this.config.minConfidence || 0.6,
+      strongConfidence: this.config.strongConfidence || 0.8,
+      minStrength: this.config.minStrength || 0.2,
+      autoTradingEnabled: this.config.autoTradingEnabled || false,
+      ensembleWeights: this.config.ensembleWeights || {
+        lstm: 0.3,
+        transformer: 0.25,
+        randomForest: 0.2,
+        xgboost: 0.15,
+        dqn: 0.1
+      },
+      trailingConfidenceThreshold: this.config.trailingConfidenceThreshold || 0.6,
+      trailingUpdateInterval: this.config.trailingUpdateInterval || 15,
+      maxStopMovementAtr: this.config.maxStopMovementAtr || 2,
+      minProfitTarget: this.config.minProfitTarget || 25,
+      maxPositionSize: this.config.maxPositionSize || 1,
+      maxDailyRisk: this.config.maxDailyRisk || 1000,
+      volatilityAdjustment: this.config.volatilityAdjustment || 0,
+      patternConfidenceThreshold: this.config.patternConfidenceThreshold || 0.7,
+      regimeChangeThreshold: this.config.regimeChangeThreshold || 0.6,
+      momentumThreshold: this.config.momentumThreshold || 0.7,
+      breakoutStrength: this.config.breakoutStrength || 0.7,
+      daily_loss: 0,
+      consecutive_losses: 0,
+      trading_disabled: false
     };
     
     // Caching and performance (from your existing code)
@@ -56,7 +77,6 @@ class MLEngine {
     };
     
     this.isInitialized = false;
-    this.lastTradeTime = 0;
   }
 
   async initialize() {
@@ -177,33 +197,21 @@ class MLEngine {
 
   validateAndSanitizeInput(marketData) {
     try {
-      // Use data validation logic
-      const validationResult = this.dataValidator.validateMarketData(marketData);
-      
-      // Log validation warnings if any
-      if (validationResult.warnings.length > 0) {
-        logger.debug('Data validation warnings:', {
-          warnings: validationResult.warnings,
-          data: marketData
-        });
-      }
-
-      // If validation failed but we have sanitized data, use it
-      if (!validationResult.isValid) {
-        logger.warn('⚠️ Data validation failed, using sanitized data:', {
-          errors: validationResult.errors,
-          original: marketData,
-          sanitized: validationResult.sanitizedData
-        });
-      }
-
-      return validationResult.sanitizedData;
-
+      // Use your existing data validation logic
+      this.dataValidator.validateMarketData(marketData);
+      return this.dataValidator.sanitizeData(marketData);
     } catch (error) {
-      logger.error('❌ Data validation error:', error.message);
-      
-      // Return safe defaults
-      return this.dataValidator.getDefaultData();
+      logger.warn('⚠️ Data validation failed, using raw data:', error.message);
+      return {
+        instrument: marketData.instrument || 'Unknown',
+        price: marketData.price || 0,
+        rsi: marketData.rsi || 50,
+        ema_alignment: marketData.ema_alignment || 0,
+        atr: marketData.atr || 1.0,
+        volume: marketData.volume || 1000,
+        timestamp: marketData.timestamp || new Date().toISOString(),
+        ...marketData
+      };
     }
   }
 
@@ -332,7 +340,7 @@ class MLEngine {
   async evaluateTradingOpportunity(marketData) {
     logger.info('🔍 Evaluating trading opportunity...', {
       autoTradingEnabled: this.runtimeSettings.autoTradingEnabled,
-      execThreshold: this.runtimeSettings.execThreshold,
+      minConfidence: this.runtimeSettings.minConfidence,
       instrument: marketData.instrument || 'Unknown',
       price: marketData.price
     });
@@ -342,29 +350,9 @@ class MLEngine {
       return null;
     }
 
-    // Rate limiting check
-    const now = Date.now();
-    const timeSinceLastTrade = now - this.lastTradeTime;
-    if (timeSinceLastTrade < this.runtimeSettings.rateLimitMs) {
-      logger.warn('⏳ Rate limit enforced - skipping trade evaluation', {
-        timeSinceLastMs: timeSinceLastTrade,
-        rateLimitMs: this.runtimeSettings.rateLimitMs
-      });
-      return null;
-    }
-
     try {
-      // Strict data validation
-      if (this.runtimeSettings.validationRequired) {
-        const validationResult = this.validateMarketData(marketData);
-        if (!validationResult.isValid) {
-          logger.warn('⚠️ Data validation failed, skipping trade evaluation:', validationResult.errors);
-          return null;
-        }
-      }
-
       const prediction = await this.generatePrediction(marketData);
-      const threshold = this.runtimeSettings.execThreshold;
+      const threshold = this.runtimeSettings.minConfidence;
       
       logger.info('📊 Prediction generated for auto-trading evaluation:', {
         direction: prediction.direction,
@@ -385,10 +373,6 @@ class MLEngine {
           requiredThreshold: (threshold * 100).toFixed(1) + '%',
           direction: prediction.direction
         });
-        
-        // Update last trade time
-        this.lastTradeTime = now;
-        
         return this.generateTradingCommand(prediction, marketData);
       } else {
         logger.info('⏸️ Auto trade threshold NOT met', {
@@ -406,26 +390,6 @@ class MLEngine {
     }
   }
 
-  validateMarketData(data) {
-    const validationResult = this.dataValidator.validateMarketData(data);
-    
-    // Log validation details
-    if (!validationResult.isValid) {
-      logger.warn('⚠️ Market data validation failed:', {
-        errors: validationResult.errors,
-        warnings: validationResult.warnings,
-        receivedData: {
-          price: data.price,
-          instrument: data.instrument,
-          atr: data.atr,
-          volume: data.volume
-        }
-      });
-    }
-    
-    return validationResult;
-  }
-
   generateTradingCommand(prediction, marketData) {
     // Your existing trading command generation logic
     const atr = marketData.atr || (marketData.price * 0.001);
@@ -437,7 +401,7 @@ class MLEngine {
         instrument: marketData.instrument || 'Unknown',
         command: 'go_long',
         quantity: 1,
-        entry_price: marketData.price,
+        price: marketData.price,
         stop_price: marketData.price - atr,
         target_price: marketData.price + (atr * 2),
         reason: `ML ${prediction.direction} (conf ${(prediction.confidence*100).toFixed(1)}%)`
@@ -449,7 +413,7 @@ class MLEngine {
         instrument: marketData.instrument || 'Unknown',
         command: 'go_short',
         quantity: 1,
-        entry_price: marketData.price,
+        price: marketData.price,
         stop_price: marketData.price + atr,
         target_price: marketData.price - (atr * 2),
         reason: `ML ${prediction.direction} (conf ${(prediction.confidence*100).toFixed(1)}%)`
@@ -473,6 +437,35 @@ class MLEngine {
     return this.runtimeSettings;
   }
 
+  persistSettings() {
+    try {
+      const fs = require('fs');
+      const settingsToSave = {
+        minConfidence: this.runtimeSettings.minConfidence,
+        autoTradingEnabled: this.runtimeSettings.autoTradingEnabled,
+        strongConfidence: this.runtimeSettings.strongConfidence,
+        minStrength: this.runtimeSettings.minStrength,
+        ensembleWeights: this.runtimeSettings.ensembleWeights,
+        trailingConfidenceThreshold: this.runtimeSettings.trailingConfidenceThreshold,
+        trailingUpdateInterval: this.runtimeSettings.trailingUpdateInterval,
+        maxStopMovementAtr: this.runtimeSettings.maxStopMovementAtr,
+        minProfitTarget: this.runtimeSettings.minProfitTarget,
+        maxPositionSize: this.runtimeSettings.maxPositionSize,
+        maxDailyRisk: this.runtimeSettings.maxDailyRisk,
+        volatilityAdjustment: this.runtimeSettings.volatilityAdjustment,
+        patternConfidenceThreshold: this.runtimeSettings.patternConfidenceThreshold,
+        regimeChangeThreshold: this.runtimeSettings.regimeChangeThreshold,
+        momentumThreshold: this.runtimeSettings.momentumThreshold,
+        breakoutStrength: this.runtimeSettings.breakoutStrength
+      };
+      
+      fs.writeFileSync(config.paths.settings, JSON.stringify(settingsToSave, null, 2));
+      logger.debug('💾 ML settings persisted successfully');
+    } catch (error) {
+      logger.warn('⚠️ Failed to persist settings:', error.message);
+    }
+  }
+
   async loadPersistedSettings() {
     try {
       const fs = require('fs');
@@ -480,21 +473,29 @@ class MLEngine {
       
       if (fs.existsSync(settingsPath)) {
         const persistedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        this.runtimeSettings = { ...this.runtimeSettings, ...persistedSettings };
+        this.runtimeSettings = {
+          ...this.runtimeSettings,
+          minConfidence: persistedSettings.minConfidence ?? this.runtimeSettings.minConfidence,
+          autoTradingEnabled: persistedSettings.autoTradingEnabled ?? this.runtimeSettings.autoTradingEnabled,
+          strongConfidence: persistedSettings.strongConfidence ?? this.runtimeSettings.strongConfidence,
+          minStrength: persistedSettings.minStrength ?? this.runtimeSettings.minStrength,
+          ensembleWeights: persistedSettings.ensembleWeights ?? this.runtimeSettings.ensembleWeights,
+          trailingConfidenceThreshold: persistedSettings.trailingConfidenceThreshold ?? this.runtimeSettings.trailingConfidenceThreshold,
+          trailingUpdateInterval: persistedSettings.trailingUpdateInterval ?? this.runtimeSettings.trailingUpdateInterval,
+          maxStopMovementAtr: persistedSettings.maxStopMovementAtr ?? this.runtimeSettings.maxStopMovementAtr,
+          minProfitTarget: persistedSettings.minProfitTarget ?? this.runtimeSettings.minProfitTarget,
+          maxPositionSize: persistedSettings.maxPositionSize ?? this.runtimeSettings.maxPositionSize,
+          maxDailyRisk: persistedSettings.maxDailyRisk ?? this.runtimeSettings.maxDailyRisk,
+          volatilityAdjustment: persistedSettings.volatilityAdjustment ?? this.runtimeSettings.volatilityAdjustment,
+          patternConfidenceThreshold: persistedSettings.patternConfidenceThreshold ?? this.runtimeSettings.patternConfidenceThreshold,
+          regimeChangeThreshold: persistedSettings.regimeChangeThreshold ?? this.runtimeSettings.regimeChangeThreshold,
+          momentumThreshold: persistedSettings.momentumThreshold ?? this.runtimeSettings.momentumThreshold,
+          breakoutStrength: persistedSettings.breakoutStrength ?? this.runtimeSettings.breakoutStrength
+        };
         logger.info('✅ Loaded persisted ML settings:', this.runtimeSettings);
       }
     } catch (error) {
       logger.warn('⚠️ Failed to load persisted settings:', error.message);
-    }
-  }
-
-  persistSettings() {
-    try {
-      const fs = require('fs');
-      fs.writeFileSync(config.paths.settings, JSON.stringify(this.runtimeSettings, null, 2));
-      logger.debug('💾 ML settings persisted');
-    } catch (error) {
-      logger.warn('⚠️ Failed to persist settings:', error.message);
     }
   }
 

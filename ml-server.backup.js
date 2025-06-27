@@ -83,7 +83,7 @@ const io = socketIo(server, {
 
 // Runtime adjustable settings received from dashboard
 const runtimeSettings = {
-  execThreshold: parseFloat(process.env.EXEC_THRESHOLD || '0.7'),
+  minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0.7'),
   autoTradingEnabled: process.env.AUTO_TRADING_ENABLED === 'true' || false
 }
 
@@ -96,7 +96,7 @@ function loadPersistedSettings() {
     
     if (fs.existsSync(settingsPath)) {
       const persistedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
-      runtimeSettings.execThreshold = persistedSettings.execThreshold ?? runtimeSettings.execThreshold
+      runtimeSettings.minConfidence = persistedSettings.minConfidence ?? runtimeSettings.minConfidence
       runtimeSettings.autoTradingEnabled = persistedSettings.autoTradingEnabled ?? runtimeSettings.autoTradingEnabled
       logger.info('✅ Loaded persisted settings', runtimeSettings)
     }
@@ -128,7 +128,7 @@ io.on('connection', (dashboardSocket) => {
 
   // Send current settings when dashboard connects
   dashboardSocket.emit('current_settings', {
-    execThreshold: runtimeSettings.execThreshold,
+    minConfidence: runtimeSettings.minConfidence,
     autoTradingEnabled: runtimeSettings.autoTradingEnabled
   })
 
@@ -137,7 +137,7 @@ io.on('connection', (dashboardSocket) => {
     if (typeof ack === 'function') {
       ack({
         success: true,
-        execThreshold: runtimeSettings.execThreshold,
+        minConfidence: runtimeSettings.minConfidence,
         autoTradingEnabled: runtimeSettings.autoTradingEnabled
       })
     }
@@ -145,8 +145,8 @@ io.on('connection', (dashboardSocket) => {
 
   dashboardSocket.on('update_settings', (settings, ack) => {
     if (typeof settings.minConfidence === 'number') {
-      runtimeSettings.execThreshold = settings.minConfidence
-      logger.info('⚙️ execThreshold updated via dashboard', { execThreshold: runtimeSettings.execThreshold })
+      runtimeSettings.minConfidence = settings.minConfidence
+      logger.info('⚙️ minConfidence updated via dashboard', { minConfidence: runtimeSettings.minConfidence })
     }
     if (typeof settings.autoTradingEnabled === 'boolean') {
       runtimeSettings.autoTradingEnabled = settings.autoTradingEnabled
@@ -159,7 +159,7 @@ io.on('connection', (dashboardSocket) => {
     if (typeof ack === 'function') {
       ack({ 
         success: true, 
-        execThreshold: runtimeSettings.execThreshold,
+        minConfidence: runtimeSettings.minConfidence,
         autoTradingEnabled: runtimeSettings.autoTradingEnabled 
       })
     }
@@ -5298,11 +5298,11 @@ async function evaluateAndSendTradingCommand(marketData, socket) {
     logger.debug('🤖 Starting automated trading evaluation', { 
       instrument: marketData.instrument, 
       price: marketData.price,
-      threshold: runtimeSettings.execThreshold 
+      threshold: runtimeSettings.minConfidence 
     })
     
     const prediction = await predictionService.generatePrediction(marketData);
-    const threshold = runtimeSettings.execThreshold ?? 0.7
+    const threshold = runtimeSettings.minConfidence ?? 0.7
     
     logger.debug('🎯 ML Prediction received', { 
       direction: prediction.direction, 

@@ -14,17 +14,17 @@
     },
     "dependencies": {
         "@tensorflow/tfjs": "^4.17.0",
-        "@tensorflow/tfjs-node": "^4.22.0",
+        "@tensorflow/tfjs-backend-cpu": "^4.22.0",
         "dotenv": "^16.4.1",
         "express": "^4.18.2",
         "lru-cache": "^10.2.0",
         "moment": "^2.30.1",
         "node-fetch": "^2.7.0",
+        "socket.io": "^4.7.5",
         "technicalindicators": "^3.1.0",
         "uuid": "^9.0.1",
         "winston": "^3.11.0",
-        "ws": "^8.16.0",
-        "socket.io": "^4.7.5"
+        "ws": "^8.16.0"
     },
     "devDependencies": {
         "eslint": "^8.56.0",

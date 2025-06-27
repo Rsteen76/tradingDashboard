@@ -48,10 +48,11 @@ class MLTradingServer {
             logger.info('✅ Position Manager initialized');
 
             this.smartTrailing = new SmartTrailing();
-            logger.info('✅ Smart Trailing initialized');
+            await this.smartTrailing.initialize();
+            logger.info('✅ Smart Trailing system initialized');
 
             this.adaptiveLearning = new AdaptiveLearning();
-            logger.info('✅ Adaptive Learning initialized');
+            logger.info('✅ Adaptive Learning engine initialized');
 
             this.dataCollector = new DataCollector();
             logger.info('✅ Data Collector initialized');
@@ -68,6 +69,18 @@ class MLTradingServer {
             });
             await this.mlEngine.initialize();
             logger.info('✅ ML Engine initialized');
+
+            // Initialize REAL AI Engine for maximum profit optimization
+            const AdvancedAIEngine = require('./core/advanced-ai-engine');
+            const ProfitMaximizer = require('./core/profit-maximizer');
+            
+            this.advancedAI = new AdvancedAIEngine();
+            await this.advancedAI.initialize();
+            logger.info('✅ Advanced AI Engine initialized with real neural networks');
+            
+            this.profitMaximizer = new ProfitMaximizer();
+            await this.profitMaximizer.initialize();
+            logger.info('✅ Profit Maximizer initialized - Real AI for maximum profit');
 
             // Setup express after components are ready
             this.setupExpress();
@@ -143,7 +156,10 @@ class MLTradingServer {
             // Wire events
             this.ninjaService.on('marketData', (data) => this.onNinjaMarketData(data));
             this.ninjaService.on('strategyStatus', (data) => this.onNinjaStrategyStatus(data));
-            this.ninjaService.on('heartbeat', () => {/* optional */});
+            this.ninjaService.on('mlPredictionRequest', (data, socket) => this.onNinjaPredictionRequest(data, socket));
+            this.ninjaService.on('smartTrailingRequest', (data, socket) => this.onNinjaSmartTrailingRequest(data, socket));
+            this.ninjaService.on('tradeExecution', (data) => this.onNinjaTradeExecution(data));
+            this.ninjaService.on('heartbeatTimeout', (data) => this.onNinjaHeartbeatTimeout(data));
         });
     }
 
@@ -187,64 +203,115 @@ class MLTradingServer {
                 });
             }
 
-            // IMPORTANT: Auto trading evaluation
+            // ADVANCED AI TRADING EVALUATION - Real ML for Maximum Profit
             try {
-                logger.debug('🔄 Starting auto trading evaluation...', {
-                    mlEngineReady: !!this.mlEngine,
+                logger.debug('🤖 Starting ADVANCED AI trading evaluation...', {
+                    advancedAIReady: !!this.advancedAI,
+                    profitMaximizerReady: !!this.profitMaximizer,
                     ninjaServiceReady: !!this.ninjaService,
                     marketDataExists: !!enriched
                 });
 
-                if (this.mlEngine) {
-                    const tradingOpportunity = await this.mlEngine.evaluateTradingOpportunity(enriched);
+                if (this.advancedAI && this.profitMaximizer) {
+                    // Use REAL AI for maximum profit optimization
+                    const currentPosition = { quantity: 0, avgPrice: 0 }; // Get from position manager
+                    const accountInfo = { balance: 100000 }; // Get from account manager
                     
-                    if (tradingOpportunity) {
-                        logger.info('🚨 AUTO TRADING OPPORTUNITY DETECTED! 🚨', {
-                            command: tradingOpportunity.command,
-                            instrument: tradingOpportunity.instrument,
-                            quantity: tradingOpportunity.quantity,
-                            price: tradingOpportunity.price,
-                            confidence: tradingOpportunity.confidence || 'N/A',
-                            reason: tradingOpportunity.reason,
+                    const profitOptimization = await this.profitMaximizer.optimizeForMaximumProfit(
+                        enriched, 
+                        currentPosition, 
+                        accountInfo
+                    );
+                    
+                    // Only trade if AI is highly confident about profit potential
+                    const shouldTrade = profitOptimization.confidence > 0.75 && 
+                                       profitOptimization.expectedProfit > 25; // Minimum $25 profit target
+                    
+                    if (shouldTrade) {
+                        logger.info('🚨 ADVANCED AI PROFIT OPPORTUNITY DETECTED! 🚨', {
+                            action: profitOptimization.action,
+                            expectedProfit: profitOptimization.expectedProfit,
+                            maxProfitPotential: profitOptimization.maxProfitPotential,
+                            confidence: profitOptimization.confidence,
+                            positionSize: profitOptimization.positionSize,
+                            riskRewardRatio: profitOptimization.riskRewardRatio,
+                            marketRegime: profitOptimization.marketRegime,
+                            aiModelsUsed: profitOptimization.aiModelsUsed,
                             ninjaServiceAvailable: !!this.ninjaService
                         });
+                        
+                        // Convert AI recommendation to NinjaTrader command
+                        const tradingCommand = {
+                            command: profitOptimization.action === 'up' ? 'go_long' : 'go_short',
+                            instrument: enriched.instrument || 'NQ',
+                            quantity: profitOptimization.positionSize,
+                            entry_price: profitOptimization.optimalEntry,
+                            stop_price: profitOptimization.optimalStopLoss,
+                            target_price: profitOptimization.optimalExit,
+                            timestamp: new Date().toISOString(),
+                            reason: `AI Profit Optimization: ${profitOptimization.expectedProfit.toFixed(2)} expected profit`,
+                            confidence: profitOptimization.confidence,
+                            ai_reasoning: profitOptimization.reasoning,
+                            hold_time: profitOptimization.holdTime,
+                            risk_reward: profitOptimization.riskRewardRatio
+                        };
+
+                        if (this.ninjaService) {
+                            const sent = this.ninjaService.sendTradingCommand(tradingCommand);
+
+                            logger.info('📡 AI-Optimized Trading Command sent to NinjaTrader:', {
+                                commandsSent: sent,
+                                success: sent > 0,
+                                expectedProfit: profitOptimization.expectedProfit,
+                                maxProfit: profitOptimization.maxProfitPotential,
+                                stop: profitOptimization.optimalStopLoss,
+                                target: profitOptimization.optimalExit,
+                                riskReward: profitOptimization.riskRewardRatio
+                            });
+                            
+                            // Broadcast AI trade signal to dashboard
+                            if (this.io && sent > 0) {
+                                this.io.emit('ai_trade_signal', {
+                                    type: 'ai_profit_optimization',
+                                    signal: profitOptimization,
+                                    command: tradingCommand,
+                                    timestamp: new Date().toISOString()
+                                });
+                                logger.info('📢 AI profit optimization signal broadcasted to dashboard');
+                            }
+                        } else {
+                            logger.error('❌ AI profit opportunity detected but NinjaTrader service is NOT available!');
+                        }
                     } else {
-                        logger.debug('⚪ No auto trading opportunity at this time');
+                        logger.debug('⚪ AI analysis: No high-confidence profit opportunity at this time', {
+                            confidence: profitOptimization.confidence,
+                            expectedProfit: profitOptimization.expectedProfit,
+                            threshold: 0.75
+                        });
                     }
+                } else {
+                    logger.debug('⚠️ Advanced AI Engine not available for profit optimization');
+                    
+                    // Fallback to basic ML engine
+                    if (this.mlEngine) {
+                        const tradingOpportunity = await this.mlEngine.evaluateTradingOpportunity(enriched);
 
                     if (tradingOpportunity && this.ninjaService) {
-                        // Send trading command to NinjaTrader
                         const sent = this.ninjaService.sendTradingCommand({
                             command: tradingOpportunity.command,
                             instrument: tradingOpportunity.instrument,
                             quantity: tradingOpportunity.quantity,
-                            timestamp: tradingOpportunity.timestamp,
-                            entry_price: tradingOpportunity.entry_price,
-                            stop_price: tradingOpportunity.stop_price,
-                            target_price: tradingOpportunity.target_price
-                        });
-
-                        logger.info('📡 Trading command sent to NinjaTrader:', {
-                            commandsSent: sent,
-                            success: sent > 0
-                        });
-                        
-                        // Broadcast auto trade signal to dashboard
-                        if (this.io && sent > 0) {
-                            this.io.emit('auto_trade_signal', {
-                                type: 'auto_trade_executed',
-                                signal: tradingOpportunity,
-                                timestamp: new Date().toISOString()
+                                timestamp: tradingOpportunity.timestamp,
+                                stop_price: tradingOpportunity.stop_loss,
+                                target_price: tradingOpportunity.target,
+                                reason: tradingOpportunity.reason + ' (Fallback ML)'
                             });
-                            logger.info('📢 Auto trade signal broadcasted to dashboard');
-                        } else {
-                            logger.warn('⚠️ Failed to broadcast auto trade signal - no connected clients or command failed');
-                        }
-                    } else if (tradingOpportunity && !this.ninjaService) {
-                        logger.error('❌ Auto trading opportunity detected but NinjaTrader service is NOT available!');
+                            
+                            if (sent > 0) {
+                                logger.info('📡 Fallback ML command sent to NinjaTrader');
                     }
-                } else {
-                    logger.debug('⚠️ ML Engine not available for auto trading evaluation');
+                        }
+                    }
                 }
             } catch (autoTradeError) {
                 logger.warn('⚠️ Auto trading evaluation failed:', autoTradeError.message);
@@ -273,7 +340,7 @@ class MLTradingServer {
                 const currentSettings = this.mlEngine ? this.mlEngine.settings : {};
                 logger.debug('📤 Emitting strategy_data with settings:', {
                     currentSettings,
-                    execThreshold: currentSettings.execThreshold,
+                    minConfidence: currentSettings.minConfidence,
                     autoTradingEnabled: currentSettings.autoTradingEnabled
                 });
                 
@@ -413,6 +480,175 @@ class MLTradingServer {
         }
     }
 
+    // CRITICAL: Add missing NinjaTrader event handlers
+    async onNinjaPredictionRequest(data, socket) {
+        try {
+            logger.info('🧠 ML Prediction request from NinjaTrader:', {
+                instrument: data.instrument,
+                requestType: data.type
+            });
+
+            if (this.mlEngine && this.mlEngine.isReady) {
+                const prediction = await this.mlEngine.generatePrediction(data);
+                
+                // Send prediction back to NinjaTrader
+                const response = {
+                    type: 'ml_prediction_response',
+                    instrument: data.instrument,
+                    timestamp: new Date().toISOString(),
+                    prediction: prediction
+                };
+
+                if (socket && socket.writable) {
+                    socket.write(JSON.stringify(response) + '\n');
+                    logger.info('📤 ML prediction sent back to NinjaTrader');
+                }
+            } else {
+                logger.warn('⚠️ ML Engine not ready for prediction request');
+            }
+        } catch (error) {
+            logger.error('❌ Error handling ML prediction request:', error);
+        }
+    }
+
+    async onNinjaSmartTrailingRequest(data, socket) {
+        try {
+            logger.info('🎯 Smart Trailing request from NinjaTrader:', {
+                instrument: data.instrument,
+                position: data.position_direction,
+                currentPrice: data.current_price,
+                currentStop: data.current_stop,
+                profitPercent: data.profit_percent
+            });
+
+            if (this.smartTrailing && this.smartTrailing.initialized) {
+                // Prepare position data for smart trailing calculation
+                const positionData = {
+                    instrument: data.instrument,
+                    direction: data.position_direction,
+                    entryPrice: data.entry_price,
+                    currentPrice: data.current_price,
+                    currentStop: data.current_stop,
+                    quantity: data.quantity,
+                    profitPercent: data.profit_percent || 0,
+                    timeInPosition: data.time_in_position || 0
+                };
+
+                const marketData = {
+                    price: data.current_price,
+                    atr: data.atr,
+                    volume: data.volume,
+                    rsi: data.rsi,
+                    ema_alignment: data.ema_alignment,
+                    adx: data.adx,
+                    ema5: data.ema5,
+                    ema8: data.ema8,
+                    ema13: data.ema13,
+                    ema21: data.ema21,
+                    ema50: data.ema50,
+                    timestamp: data.timestamp
+                };
+
+                // Calculate optimal trailing stop using AI
+                const trailingStop = await this.smartTrailing.calculateOptimalTrailingStop(positionData, marketData);
+                
+                // Send smart trailing response back to NinjaTrader
+                const response = {
+                    type: 'smart_trailing_response',
+                    instrument: data.instrument,
+                    timestamp: new Date().toISOString(),
+                    trailingStop: {
+                        stopPrice: trailingStop.stopPrice,
+                        algorithm: trailingStop.algorithm,
+                        confidence: trailingStop.confidence,
+                        reasoning: trailingStop.reasoning,
+                        metadata: trailingStop.metadata
+                    }
+                };
+
+                if (socket && socket.writable) {
+                    socket.write(JSON.stringify(response) + '\n');
+                    logger.info('📤 Smart trailing response sent to NinjaTrader:', {
+                        algorithm: trailingStop.algorithm,
+                        newStop: trailingStop.stopPrice,
+                        confidence: trailingStop.confidence
+                    });
+                }
+
+                // Also broadcast to dashboard for monitoring
+                if (this.io) {
+                    this.io.emit('smart_trailing_update', {
+                        instrument: data.instrument,
+                        trailingStop: trailingStop,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            } else {
+                logger.warn('⚠️ Smart Trailing system not initialized');
+                
+                // Send fallback response
+                const fallbackResponse = {
+                    type: 'smart_trailing_response',
+                    instrument: data.instrument,
+                    timestamp: new Date().toISOString(),
+                    trailingStop: {
+                        stopPrice: data.current_stop, // Keep current stop
+                        algorithm: 'fallback',
+                        confidence: 0.5,
+                        reasoning: 'Smart trailing system not available'
+                    }
+                };
+
+                if (socket && socket.writable) {
+                    socket.write(JSON.stringify(fallbackResponse) + '\n');
+                }
+            }
+        } catch (error) {
+            logger.error('❌ Error handling smart trailing request:', error);
+        }
+    }
+
+    onNinjaTradeExecution(data) {
+        try {
+            logger.info('💰 Trade execution from NinjaTrader:', {
+                instrument: data.instrument,
+                action: data.action,
+                quantity: data.quantity,
+                price: data.price,
+                pnl: data.pnl
+            });
+
+            // Send trade execution to adaptive learning engine if available
+            if (this.adaptiveLearning) {
+                this.adaptiveLearning.learnFromTrade(data);
+            }
+
+            // Broadcast to dashboard
+            if (this.io) {
+                this.io.emit('trade_execution', {
+                    type: 'trade_executed',
+                    trade: data,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (error) {
+            logger.error('❌ Error handling trade execution:', error);
+        }
+    }
+
+    onNinjaHeartbeatTimeout(data) {
+        logger.warn('💔 NinjaTrader heartbeat timeout:', data);
+        
+        // Broadcast connection issue to dashboard
+        if (this.io) {
+            this.io.emit('connection_status', {
+                type: 'ninja_heartbeat_timeout',
+                data: data,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
     async start() {
         try {
             logger.info('🚀 Starting ML Trading Server...');
@@ -451,7 +687,10 @@ class MLTradingServer {
                                 command: payload.command,
                                 instrument: payload.instrument || 'ES',
                                 quantity: payload.quantity || 1,
-                                timestamp: new Date().toISOString()
+                                timestamp: new Date().toISOString(),
+                                stop_price: payload.stop_price,  // Include stop loss
+                                target_price: payload.target_price,  // Include take profit
+                                reason: payload.reason || 'Manual Trade'  // Include reason
                             });
 
                             if (typeof ack === 'function') {
@@ -473,14 +712,48 @@ class MLTradingServer {
                         logger.info('⚙️ Socket.IO update_settings received', { id: socket.id, settings });
 
                         if (this.mlEngine) {
-                            const updatedSettings = this.mlEngine.updateSettings(settings);
+                            // Update all settings with consistent property names
+                            const updatedSettings = this.mlEngine.updateSettings({
+                                minConfidence: settings.minConfidence,
+                                autoTradingEnabled: settings.autoTradingEnabled,
+                                strongConfidence: settings.strongConfidence,
+                                minStrength: settings.minStrength,
+                                ensembleWeights: settings.modelWeights,
+                                trailingConfidenceThreshold: settings.trailingConfidenceThreshold,
+                                trailingUpdateInterval: settings.trailingUpdateInterval,
+                                maxStopMovementAtr: settings.maxStopMovementAtr,
+                                minProfitTarget: settings.minProfitTarget,
+                                maxPositionSize: settings.maxPositionSize,
+                                maxDailyRisk: settings.maxDailyRisk,
+                                volatilityAdjustment: settings.volatilityAdjustment,
+                                patternConfidenceThreshold: settings.patternConfidenceThreshold,
+                                regimeChangeThreshold: settings.regimeChangeThreshold,
+                                momentumThreshold: settings.momentumThreshold,
+                                breakoutStrength: settings.breakoutStrength
+                            });
                             
                             if (typeof ack === 'function') {
                                 ack(updatedSettings);
                             }
                             
-                            // Broadcast updated settings to all clients
+                            // Broadcast updated settings to all clients via both events
                             this.io.emit('current_settings', updatedSettings);
+                            
+                            // Also emit strategy_data with updated settings using consistent property names
+                            this.io.emit('strategy_data', {
+                                riskManagement: {
+                                    ...updatedSettings,
+                                    minConfidence: updatedSettings.minConfidence,  // Ensure consistent naming
+                                    trading_disabled: false,
+                                    daily_loss: 0,
+                                    consecutive_losses: 0
+                                },
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            logger.info('📢 Updated settings broadcasted via both events', {
+                                settings: updatedSettings
+                            });
                         } else {
                             logger.warn('ML Engine not initialized; cannot update settings');
                             if (typeof ack === 'function') ack({ error: 'ml_engine_unavailable' });

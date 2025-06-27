@@ -12,10 +12,12 @@ try {
   console.log('✅ Logger loaded');
   
   console.log('Creating ML Engine instance...');
-  const mlEngine = new MLEngine({
-    execThreshold: 0.7,
-    autoTradingEnabled: false
-  });
+  const testConfig = {
+    autoTradingEnabled: true,
+    minConfidence: 0.7,
+    // ... rest of config
+  };
+  const mlEngine = new MLEngine(testConfig);
   console.log('✅ ML Engine instance created');
   
   console.log('Initializing ML Engine...');

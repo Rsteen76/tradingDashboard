@@ -25,6 +25,11 @@ interface SmartTrailingPanelProps {
     ml_volatility_prediction?: number
     
     timestamp?: string
+    
+    // Take-profit data
+    target_price?: number
+    target1?: number
+    target2?: number
   }
   isLoading?: boolean
 }
@@ -45,6 +50,14 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
   const updateInterval = data.trailing_update_interval || 15
   const maxMovement = data.max_stop_movement_atr || 0.5
   const lastUpdate = data.last_trailing_update || 0
+  
+  // Add take-profit data
+  const targetPrice = data.target_price || 0
+  const target1 = data.target1 || 0
+  const target2 = data.target2 || 0
+  
+  // Determine the display target price (prefer target_price, fallback to target2 or target1)
+  const displayTarget = targetPrice > 0 ? targetPrice : (target2 > 0 ? target2 : target1)
   
   // Position data
   const position = data.position || 'Flat'
@@ -198,13 +211,33 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
             {isActive && algorithm !== 'none' && (
               <div className="mt-3 pt-3 border-t border-gray-700/50">
                 <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <span className="text-gray-500">Algorithm:</span>
-                    <div className="text-white font-medium">{algorithm.replace('_', ' ').toUpperCase()}</div>
+                  <div className="space-y-1">
+                    <span className="text-gray-400">Algorithm</span>
+                    <div className="font-medium text-white">{algorithm.replace('_', ' ')}</div>
                   </div>
-                  <div>
-                    <span className="text-gray-500">Confidence:</span>
-                    <div className="text-green-400 font-medium">{mlConfidence.toFixed(0)}%</div>
+                  <div className="space-y-1 text-right">
+                    <span className="text-gray-400">Stop Price</span>
+                    <div className="font-medium text-red-400">${currentStop.toFixed(2)}</div>
+                  </div>
+                  {displayTarget > 0 && (
+                    <>
+                      <div className="space-y-1">
+                        <span className="text-gray-400">Target Price</span>
+                        <div className="font-medium text-green-400">${displayTarget.toFixed(2)}</div>
+                      </div>
+                      <div className="space-y-1 text-right">
+                        <span className="text-gray-400">Distance to Target</span>
+                        <div className="font-medium">{currentPrice > 0 ? Math.abs(currentPrice - displayTarget).toFixed(2) : 'N/A'} pts</div>
+                      </div>
+                    </>
+                  )}
+                  <div className="space-y-1">
+                    <span className="text-gray-400">Stop Distance</span>
+                    <div className="font-medium">{stopDistance.toFixed(2)} pts {atr > 0 ? `(${stopDistanceATR.toFixed(2)}x ATR)` : ''}</div>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <span className="text-gray-400">Profit Protected</span>
+                    <div className="font-medium text-green-400">{profitProtected.toFixed(2)} pts</div>
                   </div>
                 </div>
               </div>

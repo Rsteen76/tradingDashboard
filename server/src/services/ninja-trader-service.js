@@ -42,44 +42,8 @@ class NinjaTraderService extends EventEmitter {
         });
 
         this.server.on('error', (error) => {
-          // If port is already in use, attempt to connect as a client instead of failing
-          if (error.code === 'EADDRINUSE') {
-            logger.warn('⚠️ Port already in use. Attempting to connect as client instead of server.', {
-              port: this.config.port,
-              host: this.config.host
-            });
-
-            // Delay a moment, then try client connection
-            setTimeout(() => {
-              const client = net.createConnection({
-                port: this.config.port,
-                host: this.config.host
-              }, () => {
-                logger.logConnection('NinjaTrader TCP', 'connected-as-client', {
-                  port: this.config.port,
-                  host: this.config.host
-                });
-
-                // Re-use existing connection handling for uniform processing
-                this.handleConnection(client);
-                this.startHeartbeatMonitoring();
-                resolve();
-              });
-
-              client.on('error', (connErr) => {
-                logger.error('❌ Failed to connect to existing NinjaTrader server:', {
-                  error: connErr.message,
-                  port: this.config.port,
-                  host: this.config.host
-                });
-                reject(connErr);
-              });
-            }, 500);
-
-          } else {
-            logger.error('❌ NinjaTrader server error:', { error: error.message });
-            reject(error);
-          }
+          logger.error('❌ NinjaTrader server error:', { error: error.message });
+          reject(error);
         });
 
       } catch (error) {
@@ -118,44 +82,7 @@ class NinjaTraderService extends EventEmitter {
         
         lines.forEach(line => {
           if (line.trim()) {
-            const raw = line.trim();
-            let sanitized = raw;
-
-            // -------------------------------------------------------------
-            // 1) Remove .NET Dictionary string representations completely
-            //    e.g. System.Collections.Generic.Dictionary`2[System.String,System.Object]
-            // -------------------------------------------------------------
-            sanitized = sanitized.replace(/System\.Collections\.Generic\.Dictionary[^,}\]]*/g, '{}');
-
-            // -------------------------------------------------------------
-            // 2) Remove generic System.Object artifacts that sometimes trail
-            //    e.g.  ,System.Object]
-            // -------------------------------------------------------------
-            sanitized = sanitized.replace(/,?\s*System\.Object\]?/g, '');
-
-            // -------------------------------------------------------------
-            // 3) Remove duplicate "type":"smart_trailing_request" tokens introduced
-            //    due to bad string concatenation on NinjaTrader side
-            // -------------------------------------------------------------
-            if (sanitized.includes('"type":"smart_trailing_request"')) {
-              const firstIdx = sanitized.indexOf('"type":"smart_trailing_request"');
-              const rest = sanitized.slice(firstIdx + '"type":"smart_trailing_request"'.length);
-              // Delete subsequent duplicates
-              sanitized = sanitized.slice(0, firstIdx + '"type":"smart_trailing_request"'.length) + rest.replace(/,"type":"smart_trailing_request"/g, '');
-            }
-
-            // -------------------------------------------------------------
-            // 4) Fix potential trailing commas before object/array closure
-            // -------------------------------------------------------------
-            sanitized = sanitized.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-
-            // Attempt to parse; if still invalid JSON, skip with warn
-            try {
-              JSON.parse(sanitized);
-              this.processMessage(sanitized, socket, clientId, strategyDataReceived);
-            } catch (parseErr) {
-              logger.warn('⚠️ Skipping unparseable message after sanitization', { preview: sanitized.substring(0, 150) });
-            }
+            this.processMessage(line.trim(), socket, clientId, strategyDataReceived);
           }
         });
         
@@ -225,7 +152,7 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         case 'tick_data':
-          this.emit('tickData', this.validateTickData(jsonData));
+          this.emit('tickData', jsonData);
           break;
           
         case 'strategy_status':
@@ -233,16 +160,7 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         case 'market_data':
-          const validatedData = this.validateMarketData(jsonData);
-          if (validatedData.isValid) {
-            this.emit('marketData', validatedData.data);
-          } else {
-            logger.warn('⚠️ Invalid market data received:', {
-              clientId,
-              errors: validatedData.errors,
-              data: jsonData
-            });
-          }
+          this.emit('marketData', jsonData);
           break;
           
         case 'trade_execution':
@@ -262,115 +180,20 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         default:
-          logger.warn('⚠️ Unknown message type:', {
+          logger.debug('📥 Unknown message type:', { 
             type: jsonData.type,
-            clientId
+            clientId 
           });
           this.emit('unknownMessage', jsonData, socket);
       }
       
     } catch (error) {
-      logger.error('❌ Error processing message:', {
-        error: error.message,
+      logger.error('❌ Error parsing JSON message:', { 
         clientId,
-        messagePreview: message.substring(0, 200)
+        error: error.message,
+        message: message.substring(0, 200) + '...'
       });
     }
-  }
-
-  validateMarketData(data) {
-    const errors = [];
-    const validated = { ...data };
-
-    // Required fields
-    if (!data.instrument) {
-      errors.push('Missing instrument');
-      validated.instrument = 'ES';
-    }
-
-    if (!data.price && !data.last) {
-      errors.push('Missing price/last');
-      validated.price = 0;
-    } else {
-      validated.price = parseFloat(data.price || data.last);
-      if (isNaN(validated.price)) {
-        errors.push('Invalid price format');
-        validated.price = 0;
-      }
-    }
-
-    // Technical indicators
-    if (!data.atr) {
-      errors.push('Missing ATR');
-      validated.atr = validated.price ? validated.price * 0.001 : 1.0;
-    } else {
-      validated.atr = parseFloat(data.atr);
-      if (isNaN(validated.atr) || validated.atr <= 0) {
-        errors.push('Invalid ATR value');
-        validated.atr = validated.price ? validated.price * 0.001 : 1.0;
-      }
-    }
-
-    // Optional fields with validation
-    if (data.volume !== undefined) {
-      validated.volume = parseInt(data.volume);
-      if (isNaN(validated.volume) || validated.volume < 0) {
-        logger.warn('⚠️ Invalid volume, using default', {
-          received: data.volume,
-          using: 0
-        });
-        validated.volume = 0;
-      }
-    }
-
-    if (data.rsi !== undefined) {
-      validated.rsi = parseFloat(data.rsi);
-      if (isNaN(validated.rsi) || validated.rsi < 0 || validated.rsi > 100) {
-        logger.warn('⚠️ Invalid RSI, using default', {
-          received: data.rsi,
-          using: 50
-        });
-        validated.rsi = 50;
-      }
-    }
-
-    // Add validation timestamp
-    validated.validated_at = new Date().toISOString();
-    validated.validation_errors = errors;
-
-    return {
-      isValid: errors.length === 0,
-      errors,
-      data: validated
-    };
-  }
-
-  validateTickData(data) {
-    const validated = { ...data };
-    
-    // Ensure numeric price
-    if (data.price) {
-      validated.price = parseFloat(data.price);
-      if (isNaN(validated.price)) {
-        logger.warn('⚠️ Invalid tick price, using last valid', {
-          received: data.price
-        });
-        validated.price = 0;
-      }
-    }
-    
-    // Ensure numeric volume
-    if (data.volume) {
-      validated.volume = parseInt(data.volume);
-      if (isNaN(validated.volume) || validated.volume < 0) {
-        logger.warn('⚠️ Invalid tick volume, using 0', {
-          received: data.volume
-        });
-        validated.volume = 0;
-      }
-    }
-    
-    return validated;
   }
 
   isStrategyConfirmationMessage(jsonData) {

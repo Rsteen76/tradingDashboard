@@ -1,4 +1,4 @@
 {
-  "execThreshold": 0.45,
+  "minConfidence": 0.45,
   "autoTradingEnabled": true
 }

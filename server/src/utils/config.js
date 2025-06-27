@@ -21,22 +21,46 @@ const config = {
     connectionTimeout: 30000
   },
 
-  // ML Engine settings (from your existing runtimeSettings)
+  // ML Engine settings
   ml: {
-    execThreshold: parseFloat(process.env.EXEC_THRESHOLD || '0.7'),
+    // Core Trading Settings
+    minConfidence: parseFloat(process.env.MIN_CONFIDENCE || '0.6'),
     autoTradingEnabled: process.env.AUTO_TRADING_ENABLED === 'true' || false,
+    strongConfidence: parseFloat(process.env.STRONG_CONFIDENCE || '0.8'),
+    minStrength: parseFloat(process.env.MIN_STRENGTH || '0.2'),
+    
+    // Model Weights
+    ensembleWeights: {
+      lstm: parseFloat(process.env.LSTM_WEIGHT || '0.3'),
+      transformer: parseFloat(process.env.TRANSFORMER_WEIGHT || '0.25'),
+      randomForest: parseFloat(process.env.RANDOM_FOREST_WEIGHT || '0.2'),
+      xgboost: parseFloat(process.env.XGBOOST_WEIGHT || '0.15'),
+      dqn: parseFloat(process.env.DQN_WEIGHT || '0.1')
+    },
+    
+    // Smart Trailing Settings
+    trailingConfidenceThreshold: parseFloat(process.env.TRAILING_CONFIDENCE || '0.6'),
+    trailingUpdateInterval: parseInt(process.env.TRAILING_INTERVAL || '15'),
+    maxStopMovementAtr: parseFloat(process.env.MAX_STOP_MOVEMENT || '2'),
+    
+    // Risk Management
+    minProfitTarget: parseFloat(process.env.MIN_PROFIT_TARGET || '25'),
+    maxPositionSize: parseInt(process.env.MAX_POSITION_SIZE || '1'),
+    maxDailyRisk: parseFloat(process.env.MAX_DAILY_RISK || '1000'),
+    volatilityAdjustment: parseFloat(process.env.VOLATILITY_ADJUSTMENT || '0'),
+    
+    // Advanced AI Settings
+    patternConfidenceThreshold: parseFloat(process.env.PATTERN_CONFIDENCE || '0.7'),
+    regimeChangeThreshold: parseFloat(process.env.REGIME_CHANGE_THRESHOLD || '0.6'),
+    momentumThreshold: parseFloat(process.env.MOMENTUM_THRESHOLD || '0.7'),
+    breakoutStrength: parseFloat(process.env.BREAKOUT_STRENGTH || '0.7'),
+    
+    // System Settings
     predictionCacheSize: 1000,
     predictionCacheTTL: 5 * 60 * 1000, // 5 minutes
     modelUpdateCooldown: 2000,
     changeThreshold: 0.05,
-    bufferSize: 10,
-    ensembleWeights: {
-      lstm: 0.3,
-      transformer: 0.25,
-      randomForest: 0.2,
-      xgboost: 0.15,
-      dqn: 0.1
-    }
+    bufferSize: 10
   },
 
   // Database settings
@@ -110,11 +134,14 @@ if (process.env.NODE_ENV === 'production') {
   config.logging.level = 'warn';
   config.logging.console.enabled = false;
   config.ml.autoTradingEnabled = false; // Safety first in production
+  config.ml.minConfidence = 0.7; // Higher threshold in production
+  config.ml.minProfitTarget = 50; // Higher profit target in production
 }
 
 if (process.env.NODE_ENV === 'development') {
   config.logging.level = 'debug';
-  config.ml.execThreshold = 0.6; // Lower threshold for testing
+  config.ml.minConfidence = 0.6; // Lower threshold for testing
+  config.ml.minProfitTarget = 25; // Lower profit target for testing
 }
 
 module.exports = config;

@@ -160,6 +160,11 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private bool tradingDisabled = false;
 		private DateTime lastTradingResetCheck = DateTime.MinValue;
 		private readonly HashSet<string> pendingOrders = new HashSet<string>(); // Order state tracking
+		
+		// Pending Stop/Target for entry orders
+		private double pendingStopPrice = 0;
+		private double pendingTargetPrice = 0;
+		private string pendingOrderName = "";
 		#endregion
 
 		#region ML Dashboard Methods - Thread Safe & Optimized
@@ -315,13 +320,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 					Print($"🛑 ML Command '{cmd}' rejected: Circuit breakers active");
 					return;
 				}
-
-				// Duplicate trade prevention
-				if ((cmd == "go_long" || cmd == "go_short") && !ValidateNewTradeRequest(command))
-				{
-					Print($"🛑 ML Command '{cmd}' rejected: Duplicate or invalid trade");
-					return;
-				}
 				
 				switch (cmd)
 				{
@@ -395,72 +393,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Print($"Error handling ML command: {ex.Message}");
 			}
 		}
-
-		private bool ValidateNewTradeRequest(Dictionary<string, object> command)
-		{
-			try
-			{
-				// Don't enter if already in position
-				if (Position.MarketPosition != MarketPosition.Flat)
-				{
-					Print($"📊 ML trade rejected: Already in {Position.MarketPosition} position");
-					return false;
-				}
-
-				// Parse command parameters
-				double entryPrice = ParseDouble(command, "entry_price", 0);
-				double stopPrice = ParseDouble(command, "stop_price", 0);
-				double targetPrice = ParseDouble(command, "target_price", 0);
-				
-				// Validate prices
-				if (entryPrice <= 0 || stopPrice <= 0 || targetPrice <= 0)
-				{
-					Print("❌ ML trade rejected: Invalid price levels");
-					return false;
-				}
-				
-				// Validate risk-reward ratio
-				string cmd = command["command"].ToString();
-				double riskRewardRatio;
-				
-				if (cmd == "go_long")
-				{
-					double risk = entryPrice - stopPrice;
-					double reward = targetPrice - entryPrice;
-					riskRewardRatio = reward / risk;
-				}
-				else // go_short
-				{
-					double risk = stopPrice - entryPrice;
-					double reward = entryPrice - targetPrice;
-					riskRewardRatio = reward / risk;
-				}
-				
-				if (riskRewardRatio < minRiskRewardRatio)
-				{
-					Print($"❌ ML trade rejected: Risk-reward ratio too low ({riskRewardRatio:F2} < {minRiskRewardRatio:F2})");
-					return false;
-				}
-				
-				// Validate ATR-based risk
-				double atrValue = atr[0];
-				double maxRiskATR = 2.0; // Maximum risk of 2x ATR
-				double riskInATR = Math.Abs(entryPrice - stopPrice) / atrValue;
-				
-				if (riskInATR > maxRiskATR)
-				{
-					Print($"❌ ML trade rejected: Risk too high ({riskInATR:F1}x ATR > {maxRiskATR:F1}x ATR)");
-					return false;
-				}
-				
-				return true;
-			}
-			catch (Exception ex)
-			{
-				Print($"❌ Error validating trade request: {ex.Message}");
-				return false;
-			}
-		}
 		
 		// ML Trading Command Execution Methods
 		private void ExecuteMLLongCommand(Dictionary<string, object> command)
@@ -481,39 +413,44 @@ namespace NinjaTrader.NinjaScript.Strategies
 				double targetPrice = ParseDouble(command, "target_price", 0);
 				string reason = ParseString(command, "reason", "ML Signal");
 				
-				Print($"📈 Executing ML Long Command: Qty={quantity}, Entry={entryPrice:F2}, Stop={stopPrice:F2}, Target={targetPrice:F2}");
+				Print($"📈 EXECUTING ML Long Command: {quantity} @ {entryPrice:F2} | Stop: {stopPrice:F2} | Target: {targetPrice:F2} | Reason: {reason}");
 				
-				// Close any short position first
+				// CRITICAL FIX: Execute entry and immediately set stops/targets
+				ExecuteTradeWithRetry(() => {
 				if (Position.MarketPosition == MarketPosition.Short)
 				{
-					ExecuteTradeWithRetry(() => ExitShort(), "ML Long - Close Short", 3);
+						ExitShort();
 				}
 				
-				// Enter long position
-				ExecuteTradeWithRetry(() => {
+					// Place the entry order
 					EnterLong(quantity, "ML_Long");
-					entryPrice = entryPrice > 0 ? entryPrice : Close[0];
-					TrackEntry("Long", "ML", entryPrice);
 					
-					// Set stops and targets if provided
+					// IMMEDIATELY place stop and target orders if values are provided
 					if (stopPrice > 0)
 					{
-						stopLoss = stopPrice;
 						SetStopLoss("ML_Long", CalculationMode.Price, stopPrice, false);
+						stopLoss = stopPrice;
+						Print($"🛡️ STOP LOSS SET: {stopPrice:F2}");
 					}
+					
 					if (targetPrice > 0)
 					{
-						target1 = targetPrice;
 						SetProfitTarget("ML_Long", CalculationMode.Price, targetPrice);
+						target1 = targetPrice;
+						Print($"🎯 TAKE PROFIT SET: {targetPrice:F2}");
 					}
-				}, "ML Long Entry", 3);
+				}, "ML Long Entry with Stops/Targets");
+
+				// Update tracking variables
+				entryPrice = Close[0];
+				longEntryPrice = Close[0];
 				
-				// Send confirmation back to ML server
-				SendMLCommandConfirmation("go_long", true, reason);
+				// Send confirmation
+				SendMLCommandConfirmation("go_long", true, $"Long entry with stops/targets: {quantity} @ {entryPrice:F2}, Stop: {stopPrice:F2}, Target: {targetPrice:F2}");
 			}
 			catch (Exception ex)
 			{
-				Print($"❌ Error executing ML long command: {ex.Message}");
+				Print($"❌ Error executing ML Long command: {ex.Message}");
 				SendMLCommandConfirmation("go_long", false, $"Error: {ex.Message}");
 			}
 		}
@@ -536,41 +473,53 @@ namespace NinjaTrader.NinjaScript.Strategies
 				double targetPrice = ParseDouble(command, "target_price", 0);
 				string reason = ParseString(command, "reason", "ML Signal");
 				
-				Print($"📉 Executing ML Short Command: Qty={quantity}, Entry={entryPrice:F2}, Stop={stopPrice:F2}, Target={targetPrice:F2}");
+				Print($"📉 EXECUTING ML Short Command: {quantity} @ {entryPrice:F2} | Stop: {stopPrice:F2} | Target: {targetPrice:F2} | Reason: {reason}");
 				
-				// Close any long position first
+				// CRITICAL FIX: Execute entry and immediately set stops/targets
+				ExecuteTradeWithRetry(() => {
 				if (Position.MarketPosition == MarketPosition.Long)
 				{
-					ExecuteTradeWithRetry(() => ExitLong(), "ML Short - Close Long", 3);
+						ExitLong();
 				}
 				
-				// Enter short position
-				ExecuteTradeWithRetry(() => {
+					// Place the entry order
 					EnterShort(quantity, "ML_Short");
-					entryPrice = entryPrice > 0 ? entryPrice : Close[0];
-					TrackEntry("Short", "ML", entryPrice);
 					
-					// Set stops and targets if provided
+					// IMMEDIATELY place stop and target orders if values are provided
 					if (stopPrice > 0)
 					{
-						stopLoss = stopPrice;
 						SetStopLoss("ML_Short", CalculationMode.Price, stopPrice, false);
+						stopLoss = stopPrice;
+						Print($"🛡️ STOP LOSS SET: {stopPrice:F2}");
 					}
+					
 					if (targetPrice > 0)
 					{
-						target1 = targetPrice;
 						SetProfitTarget("ML_Short", CalculationMode.Price, targetPrice);
+						target1 = targetPrice;
+						Print($"🎯 TAKE PROFIT SET: {targetPrice:F2}");
 					}
-				}, "ML Short Entry", 3);
+				}, "ML Short Entry with Stops/Targets");
+
+				// Update tracking variables
+				entryPrice = Close[0];
+				shortEntryPrice = Close[0];
 				
-				// Send confirmation back to ML server
-				SendMLCommandConfirmation("go_short", true, reason);
+				// Send confirmation
+				SendMLCommandConfirmation("go_short", true, $"Short entry with stops/targets: {quantity} @ {entryPrice:F2}, Stop: {stopPrice:F2}, Target: {targetPrice:F2}");
 			}
 			catch (Exception ex)
 			{
-				Print($"❌ Error executing ML short command: {ex.Message}");
+				Print($"❌ Error executing ML Short command: {ex.Message}");
 				SendMLCommandConfirmation("go_short", false, $"Error: {ex.Message}");
 			}
+		}
+
+		private void ResetPendingOrders()
+		{
+			pendingStopPrice = 0;
+			pendingTargetPrice = 0;
+			pendingOrderName = "";
 		}
 		
 		private void ExecuteMLCloseCommand(Dictionary<string, object> command)
@@ -834,16 +783,128 @@ namespace NinjaTrader.NinjaScript.Strategies
 			foreach (var kvp in data)
 			{
 				jsonBuilder.Append(",");
-				if (kvp.Value is string)
-					jsonBuilder.AppendFormat("\"{0}\":\"{1}\"", kvp.Key, kvp.Value);
+				jsonBuilder.AppendFormat("\"{0}\":", kvp.Key);
+				
+				if (kvp.Value == null)
+				{
+					jsonBuilder.Append("null");
+				}
+				else if (kvp.Value is string)
+				{
+					jsonBuilder.AppendFormat("\"{0}\"", kvp.Value);
+				}
 				else if (kvp.Value is bool)
-					jsonBuilder.AppendFormat("\"{0}\":{1}", kvp.Key, kvp.Value.ToString().ToLower());
+				{
+					jsonBuilder.Append(kvp.Value.ToString().ToLower());
+				}
+				else if (kvp.Value is Dictionary<string, object>)
+				{
+					SerializeNestedDictionary(kvp.Value as Dictionary<string, object>);
+				}
+				else if (kvp.Value is IEnumerable<object>)
+				{
+					SerializeArray(kvp.Value as IEnumerable<object>);
+				}
 				else
-					jsonBuilder.AppendFormat("\"{0}\":{1}", kvp.Key, kvp.Value);
+				{
+					jsonBuilder.Append(kvp.Value);
+				}
 			}
 			
 			jsonBuilder.Append("}");
 			return jsonBuilder.ToString();
+		}
+
+		private void SerializeNestedDictionary(Dictionary<string, object> dict)
+		{
+			if (dict == null)
+			{
+				jsonBuilder.Append("null");
+				return;
+			}
+			
+			jsonBuilder.Append("{");
+			bool first = true;
+			
+			foreach (var kvp in dict)
+			{
+				if (!first) jsonBuilder.Append(",");
+				first = false;
+				
+				jsonBuilder.AppendFormat("\"{0}\":", kvp.Key);
+				
+				if (kvp.Value == null)
+				{
+					jsonBuilder.Append("null");
+				}
+				else if (kvp.Value is string)
+				{
+					jsonBuilder.AppendFormat("\"{0}\"", kvp.Value);
+				}
+				else if (kvp.Value is bool)
+				{
+					jsonBuilder.Append(kvp.Value.ToString().ToLower());
+				}
+				else if (kvp.Value is Dictionary<string, object>)
+				{
+					SerializeNestedDictionary(kvp.Value as Dictionary<string, object>);
+				}
+				else if (kvp.Value is IEnumerable<object>)
+				{
+					SerializeArray(kvp.Value as IEnumerable<object>);
+				}
+				else
+				{
+					jsonBuilder.Append(kvp.Value);
+				}
+			}
+			
+			jsonBuilder.Append("}");
+		}
+
+		private void SerializeArray(IEnumerable<object> array)
+		{
+			if (array == null)
+			{
+				jsonBuilder.Append("null");
+				return;
+			}
+			
+			jsonBuilder.Append("[");
+			bool first = true;
+			
+			foreach (var item in array)
+			{
+				if (!first) jsonBuilder.Append(",");
+				first = false;
+				
+				if (item == null)
+				{
+					jsonBuilder.Append("null");
+				}
+				else if (item is string)
+				{
+					jsonBuilder.AppendFormat("\"{0}\"", item);
+				}
+				else if (item is bool)
+				{
+					jsonBuilder.Append(item.ToString().ToLower());
+				}
+				else if (item is Dictionary<string, object>)
+				{
+					SerializeNestedDictionary(item as Dictionary<string, object>);
+				}
+				else if (item is IEnumerable<object>)
+				{
+					SerializeArray(item as IEnumerable<object>);
+				}
+				else
+				{
+					jsonBuilder.Append(item);
+				}
+			}
+			
+			jsonBuilder.Append("]");
 		}
 
 		private string CreateJsonString(string type, string instrument, string timestamp, Dictionary<string, object> data)
@@ -3302,97 +3363,113 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		protected override void OnExecutionUpdate(Cbi.Execution execution, string executionId, double price, int quantity, Cbi.MarketPosition marketPosition, string orderId, DateTime time)
 		{
-			base.OnExecutionUpdate(execution, executionId, price, quantity, marketPosition, orderId, time);
-
-			// Simple execution logging
-			Print($"🔄 EXECUTION: {execution.Order?.Name ?? "Unknown"} - {execution.Order?.OrderState} @ {price:F2}, Qty={quantity}");
-			
-			// Handle entry fills - track entry price
-			if (execution.Order != null && execution.Order.OrderState == OrderState.Filled)
-			{
-				if (execution.Order.OrderAction == OrderAction.Buy)
-				{
-					longEntryPrice = execution.Order.AverageFillPrice;
-					Print($"✅ LONG FILLED @ {longEntryPrice:F2}");
-				}
-				else if (execution.Order.OrderAction == OrderAction.SellShort)
-				{
-					shortEntryPrice = execution.Order.AverageFillPrice;
-					Print($"✅ SHORT FILLED @ {shortEntryPrice:F2}");
-				}
-			}
-
-			// Log trade when position is closed
+			// Filter for our strategy's orders and only process fills
 			if (execution.Order != null && (execution.Order.OrderState == OrderState.Filled || execution.Order.OrderState == OrderState.PartFilled))
 			{
-				if (marketPosition == MarketPosition.Flat)
+				Print($"EXECUTION UPDATE: Name={execution.Order.Name}, State={execution.Order.OrderState}, Price={price:F2}, Qty={quantity}");
+
+				// CRITICAL SAFETY: Check if this is an entry order and ensure stops/targets are placed
+				if (execution.Order.Name.Contains("Long") || execution.Order.Name.Contains("Short") || execution.Order.Name.Contains("ML_"))
 				{
-					double pnl = (lastTradeDirection == "Long") ? 
-						(price - lastEntryPrice) * execution.Quantity :
-						(lastEntryPrice - price) * execution.Quantity;
-					
-					// RECORD TRADE RESULT FOR CIRCUIT BREAKER
-					RecordTradeResult(pnl);
-					
-					// Send trade to ML Dashboard
-					if (EnableMLDashboard && mlConnected)
-					{
-						SendTradeToML(lastTradeDirection, lastEntryPrice, price, pnl);
-					}
-					
-					// Draw exit marker
-					string exitName = "Exit" + CurrentBar;
-					Brush exitColor = pnl >= 0 ? Brushes.LimeGreen : Brushes.Red;
-					
-					if (lastTradeDirection == "Long")
-					{
-						Draw.Diamond(this, exitName, false, 0, High[0] + 2 * TickSize, exitColor);
-						Draw.Text(this, "ExitText" + CurrentBar, 
-							string.Format("EXIT {0:+0.00;-0.00}", pnl), 
-							0, High[0] + 4 * TickSize, exitColor);
-					}
-					else
-					{
-						Draw.Diamond(this, exitName, false, 0, Low[0] - 2 * TickSize, exitColor);
-						Draw.Text(this, "ExitText" + CurrentBar, 
-							string.Format("EXIT {0:+0.00;-0.00}", pnl), 
-							0, Low[0] - 4 * TickSize, exitColor);
-					}
-					
-					Draw.Line(this, "TradeLine" + CurrentBar, false, 
-						Time[0], price, lastEntryTime, lastEntryPrice, 
-						exitColor, DashStyleHelper.Solid, 1);
-					
-					TrackExitAndLog(price);
+					// Wait a moment for the position to update, then ensure stops/targets exist
+					Task.Delay(100).ContinueWith(_ => {
+						try
+						{
+							EnsureAllPositionsHaveStops();
+							EnsureAllPositionsHaveTargets();
+						}
+						catch (Exception ex)
+						{
+							Print($"❌ Error in post-execution safety check: {ex.Message}");
+						}
+					});
 				}
-			}			// Enhanced position state tracking
-			Print($"🔄 EXECUTION FINAL: Strategy Position = {Position?.MarketPosition}, Execution MarketPos = {marketPosition}");
-			
-			if (Position.MarketPosition == MarketPosition.Flat)
-			{
-				Print($"🔄 POSITION WENT FLAT - Resetting all variables");
+
+				// Check if this is the fill for our pending entry order (legacy support)
+				if (!string.IsNullOrEmpty(pendingOrderName) && execution.Order.Name == pendingOrderName)
+				{
+					Print($"✅ Entry order '{pendingOrderName}' filled. Placing Stop/Target orders.");
+					
+					// Place pending stop loss order
+					if (pendingStopPrice > 0)
+					{
+						stopLoss = pendingStopPrice;
+						ExecuteTradeWithRetry(() => SetStopLoss(pendingOrderName, CalculationMode.Price, stopLoss, false), "Set Stop Loss on Fill");
+					}
+
+					// Place pending take profit order
+					if (pendingTargetPrice > 0)
+					{
+						target1 = pendingTargetPrice;
+						ExecuteTradeWithRetry(() => SetProfitTarget(pendingOrderName, CalculationMode.Price, target1), "Set Profit Target on Fill");
+					}
+					
+					// Record the actual entry after fill
+					string direction = pendingOrderName.Contains("Long") ? "LONG" : "SHORT";
+					TrackEntry(direction, "ML", execution.Price);
+
+					// Reset pending orders now that they have been placed
+					ResetPendingOrders();
+				}
 				
-				// Reset all position-related variables when position becomes flat
-				ResetPositionVariables();
-				
-				// Log the position reset for debugging
-				Print($"🔄 Position reset to FLAT - All position variables cleared at {DateTime.Now:HH:mm:ss.fff}");
-				
-				// Force synchronization check
-				SynchronizeWithAccountPosition();
+				// Handle exits
+				if (execution.Order.Name == "Profit target" || execution.Order.Name == "Stop loss")
+				{
+					TrackExitAndLog(execution.Price);
+				}
 			}
-			else if (Position.MarketPosition != MarketPosition.Flat)
+		}
+
+		// NEW SAFETY METHOD: Ensure all positions have take-profit orders
+		private void EnsureAllPositionsHaveTargets()
+		{
+			try
 			{
-				// Update entry tracking for existing positions
-				if (entryPrice == 0 && Position.AveragePrice > 0)
+				// Check if we have any positions without take-profit orders
+				if (Position.Quantity != 0)
 				{
-					Print($"🔄 UPDATING entry tracking: {Position.MarketPosition} @ {Position.AveragePrice:F2}");
-					entryPrice = Position.AveragePrice;
-					lastEntryPrice = Position.AveragePrice;
-					lastTradeDirection = Position.MarketPosition.ToString();
-					entryTime = DateTime.Now;
-					lastEntryTime = DateTime.Now;
+					// Count active profit target orders
+					int activeTargets = 0;
+					int activePositions = Math.Abs(Position.Quantity);
+					
+					foreach (var order in Account.Orders)
+					{
+						if (order.Instrument == Instrument && 
+							order.OrderState == OrderState.Working && 
+							order.OrderType == OrderType.Limit && 
+							order.Name.Contains("Profit"))
+						{
+							activeTargets++;
+						}
+					}
+					
+					Print($"🎯 TARGET CHECK: Positions={activePositions}, Active Targets={activeTargets}");
+					
+					// If we have positions but no targets, apply emergency targets
+					if (activeTargets == 0 && activePositions > 0)
+					{
+						Print($"🚨 EMERGENCY: {activePositions} positions without targets! Applying emergency targets...");
+						
+						if (Position.MarketPosition == MarketPosition.Long)
+						{
+							double emergencyTarget = Position.AveragePrice + (atr[0] * 2.0); // 2x ATR target
+							SetProfitTarget(CalculationMode.Price, emergencyTarget);
+							target1 = emergencyTarget;
+							Print($"🎯 Applied emergency LONG target @ {emergencyTarget:F2}");
+						}
+						else if (Position.MarketPosition == MarketPosition.Short)
+						{
+							double emergencyTarget = Position.AveragePrice - (atr[0] * 2.0); // 2x ATR target
+							SetProfitTarget(CalculationMode.Price, emergencyTarget);
+							target1 = emergencyTarget;
+							Print($"🎯 Applied emergency SHORT target @ {emergencyTarget:F2}");
+						}
+					}
 				}
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error ensuring targets: {ex.Message}");
 			}
 		}
 
@@ -3888,6 +3965,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 					}
 					
 
+				}
+				
+				// CRITICAL ADDITION: Ensure all positions have stops and targets
+				if (Position.Quantity != 0)
+				{
+					EnsureAllPositionsHaveStops();
+					EnsureAllPositionsHaveTargets();
 				}
 				
 				// Update ML dashboard if position changed

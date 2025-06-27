@@ -52,10 +52,11 @@ async function testSettingsPersistence() {
       const persistedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       console.log('✅ Settings file exists:', persistedSettings);
       
-      if (persistedSettings.autoTradingEnabled === true && persistedSettings.execThreshold === 0.75) {
-        console.log('✅ Settings correctly persisted to file');
+      if (persistedSettings.autoTradingEnabled === true && persistedSettings.minConfidence === 0.75) {
+        console.log('✅ Settings persisted successfully');
       } else {
-        console.log('❌ Settings not correctly persisted');
+        console.error('❌ Settings persistence test failed');
+        process.exit(1);
       }
     } else {
       console.log('❌ Settings file not created');

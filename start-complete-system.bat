@@ -23,7 +23,7 @@ timeout /t 5 /nobreak >nul
 rem Start Dashboard
 echo Starting Dashboard...
 call npm install
-start "Trading Dashboard" cmd /c "npm run dev:dashboard"
+start "Trading Dashboard" cmd /c "set HOST=0.0.0.0 && npm run dev:dashboard"
 timeout /t 5 /nobreak >nul
 
 start http://localhost:3000

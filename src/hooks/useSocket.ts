@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import io, { Socket } from 'socket.io-client'
+import { transformKeys } from '@/lib/utils'
 
 export interface MarketData {
   type: "market_data"
@@ -45,8 +46,14 @@ export interface StrategyStatus {
   tick_count_session: number
   bars_processed: number
   overall_signal_strength: number
+  signal_strength?: number;
   signal_probability_long: number
   signal_probability_short: number
+  ml_confidence_level?: number;
+  ml_confidence?: number;
+  confidence?: number;
+  minConfidence?: number;
+  autoTradingEnabled?: boolean;
   ema_alignment_score: number
   ema_alignment_strength: string
   ema_trend_direction: string
@@ -100,22 +107,39 @@ export interface TradeMessage {
 }
 
 export interface RiskManagement {
-  type: "risk_management"
-  instrument: string
-  timestamp: string
-  consecutive_losses: number
-  daily_loss: number
-  max_daily_loss: number
-  max_consecutive_losses: number
-  trading_disabled: boolean
-  session_starting_balance: number
+  minConfidence: number;
+  strongConfidence: number;
+  minStrength: number;
+  autoTradingEnabled: boolean;
+  ensembleWeights: {
+    lstm: number;
+    transformer: number;
+    randomForest: number;
+    xgboost: number;
+    dqn: number;
+  };
+  trailingConfidenceThreshold: number;
+  trailingUpdateInterval: number;
+  maxStopMovementAtr: number;
+  minProfitTarget: number;
+  maxPositionSize: number;
+  maxDailyRisk: number;
+  volatilityAdjustment: number;
+  patternConfidenceThreshold: number;
+  regimeChangeThreshold: number;
+  momentumThreshold: number;
+  breakoutStrength: number;
+  clearDirectionThreshold: number;
+  trading_disabled: boolean;
+  daily_loss: number;
+  consecutive_losses: number;
 }
 
 export interface StrategyData {
-  marketData?: MarketData
-  strategyStatus?: StrategyStatus
-  lastTrade?: TradeMessage
-  riskManagement?: RiskManagement
+  marketData: MarketData | null
+  strategyStatus: StrategyStatus | null
+  lastTrade: TradeMessage | null
+  riskManagement: RiskManagement | null
 }
 
 interface ConnectionState {
@@ -134,7 +158,12 @@ function validateData<T>(data: any, type: string): data is T {
 }
 
 export function useSocket() {
-  const [strategyData, setStrategyData] = useState<StrategyData>({})
+  const [strategyData, setStrategyData] = useState<StrategyData>({
+    marketData: null,
+    strategyStatus: null,
+    lastTrade: null,
+    riskManagement: null,
+  })
   const [marketDataHistory, setMarketDataHistory] = useState<MarketData[]>([])
   const [tradeHistory, setTradeHistory] = useState<TradeMessage[]>([])
   const [mlPrediction, setMlPrediction] = useState<any>(null)
@@ -205,101 +234,88 @@ export function useSocket() {
       })
 
       socket.on('market_data', (data: any) => {
-        if (!isSubscribed) return
+        if (!isSubscribed) return;
         if (!validateData<MarketData>(data, 'market_data')) {
-          console.error('Invalid market data:', data)
-          return
+          console.error('Invalid market data:', data);
+          return;
         }
-        console.log('Received market data:', data)
         setStrategyData(prev => ({
           ...prev,
-          marketData: data
-        }))
-        // Keep last 100 data points for the chart
-        setMarketDataHistory(prev => {
-          const newHistory = [...prev, data].slice(-100)
-          return newHistory
-        })
-      })
+          marketData: data,
+        }));
+        setMarketDataHistory(prev => [...prev, data].slice(-100));
+      });
 
       socket.on('strategy_status', (data: any) => {
-        if (!isSubscribed) return
+        if (!isSubscribed) return;
         if (!validateData<StrategyStatus>(data, 'strategy_status')) {
-          console.error('Invalid strategy status:', data)
-          return
+          console.error('Invalid strategy status:', data);
+          return;
         }
-        console.log('Received strategy status:', data)
         setStrategyData(prev => ({
           ...prev,
           strategyStatus: data
-        }))
-      })
+        }));
+      });
 
       socket.on('trade', (data: any) => {
-        if (!isSubscribed) return
+        if (!isSubscribed) return;
         if (!validateData<TradeMessage>(data, 'trade')) {
-          console.error('Invalid trade data:', data)
-          return
+          console.error('Invalid trade data:', data);
+          return;
         }
-        console.log('Received trade:', data)
         setStrategyData(prev => ({
           ...prev,
-          lastTrade: data
-        }))
-        // push to trade history (keep last 50)
-        setTradeHistory(prev => {
-          const newHist = [...prev, data]
-          return newHist.slice(-50)
-        })
-      })
+          lastTrade: data,
+        }));
+        setTradeHistory(prev => [data, ...prev].slice(0, 50));
+      });
 
       socket.on('risk_management', (data: any) => {
-        if (!isSubscribed) return
+        if (!isSubscribed) return;
         if (!validateData<RiskManagement>(data, 'risk_management')) {
-          console.error('Invalid risk management data:', data)
-          return
+          console.error('Invalid risk management data:', data);
+          return;
         }
-        console.log('Received risk management:', data)
         setStrategyData(prev => ({
           ...prev,
-          riskManagement: data
-        }))
-      })
+          riskManagement: { ...prev.riskManagement, ...data },
+        }));
+      });
 
       socket.on('ml_prediction', (data: any) => {
-        if (!isSubscribed) return
-        console.log('Received ml_prediction', data)
-        setMlPrediction(data)
-      })
+        if (!isSubscribed) return;
+        console.log('Received ml_prediction', data);
+        setMlPrediction(data);
+      });
 
-      socket.on('current_settings', (data: any) => {
-        if (!isSubscribed) return
-        console.log('Received current_settings', data)
-        // Broadcast settings to any components that need them
-        window.dispatchEvent(new CustomEvent('server-settings-received', { detail: data }))
-      })
-
-      // Handle combined strategy data from server
-      socket.on('strategy_data', (data: any) => {
-        if (!isSubscribed) return
-        console.log('Received strategy_data', data)
-        console.log('🔍 riskManagement from strategy_data:', data.riskManagement)
-        console.log('🎯 execThreshold:', data.riskManagement?.execThreshold)
-        
-        // Update strategy data with the combined structure
+      socket.on('current_settings', (settings: any) => {
+        if (!isSubscribed) return;
         setStrategyData(prev => ({
           ...prev,
-          ...data, // This includes marketData, riskManagement, etc.
-        }))
-        
-        // Also update market data history if present
-        if (data.marketData) {
-          setMarketDataHistory(prev => {
-            const newHistory = [...prev, data.marketData].slice(-100)
-            return newHistory
-          })
+          riskManagement: {
+            ...prev.riskManagement,
+            ...settings
+          }
+        }));
+      });
+
+      socket.on('strategy_data', (data: any) => {
+        if (!isSubscribed) return;
+        // More flexible validation for strategy_data - it may not have a type field
+        if (!data || typeof data !== 'object') {
+          console.error('Invalid strategy data:', data);
+          return;
         }
-      })
+        setStrategyData(prev => ({
+          ...prev,
+          ...data,
+          riskManagement: {
+            ...prev.riskManagement,
+            ...data.riskManagement
+          }
+        }));
+      });
     }
 
     // Initial connection
@@ -326,26 +342,49 @@ export function useSocket() {
   const updateServerSettings = useCallback((settings: any) => {
     return new Promise((resolve, reject) => {
       if (socketRef.current) {
-        // Map dashboard settings to server format
+        // Map dashboard settings to the full server format
         const serverSettings = {
-          execThreshold: settings.minConfidence || 0.7,
-          autoTradingEnabled: settings.autoTradingEnabled || false
-        }
+          // Core Trading Settings
+          minConfidence: settings.minConfidence,
+          autoTradingEnabled: settings.autoTradingEnabled,
+          strongConfidence: settings.strongConfidence,
+          minStrength: settings.minStrength,
+          
+          // ML Model Weights
+          ensembleWeights: settings.modelWeights,
+          
+          // Smart Trailing Settings
+          trailingConfidenceThreshold: settings.trailingConfidenceThreshold,
+          trailingUpdateInterval: settings.trailingUpdateInterval,
+          maxStopMovementAtr: settings.maxStopMovementAtr,
+          
+          // Risk Management
+          minProfitTarget: settings.minProfitTarget,
+          maxPositionSize: settings.maxPositionSize,
+          maxDailyRisk: settings.maxDailyRisk,
+          volatilityAdjustment: settings.volatilityAdjustment,
+          
+          // Advanced AI Settings
+          patternConfidenceThreshold: settings.patternConfidenceThreshold,
+          regimeChangeThreshold: settings.regimeChangeThreshold,
+          momentumThreshold: settings.momentumThreshold,
+          breakoutStrength: settings.breakoutStrength,
+        };
         
         socketRef.current.emit('update_settings', serverSettings, (response: any) => {
           if (response?.error) {
-            console.error('Failed to update settings:', response.error)
-            reject(new Error(response.error))
+            console.error('Failed to update settings:', response.error);
+            reject(new Error(response.error));
           } else {
-            console.log('Settings updated successfully:', response)
-            resolve(response)
+            console.log('Settings updated successfully:', response);
+            resolve(response);
           }
-        })
+        });
       } else {
-        reject(new Error('Socket not connected'))
+        reject(new Error('Socket not connected'));
       }
-    })
-  }, [])
+    });
+  }, []);
 
   const getCurrentSettings = useCallback(() => {
     return new Promise((resolve, reject) => {

@@ -10,8 +10,9 @@ async function testMLEngine() {
     
     // Create and initialize ML Engine
     const mlEngine = new MLEngine({
-      execThreshold: 0.7,
-      autoTradingEnabled: false // Safe for testing
+      minConfidence: 0.7,
+      autoTradingEnabled: true,
+      // ... other settings
     });
     
     logger.info('Initializing ML Engine...');
@@ -75,7 +76,7 @@ async function testMLEngine() {
     // Test settings update
     logger.info('Testing settings update...');
     const newSettings = mlEngine.updateSettings({
-      execThreshold: 0.8,
+      minConfidence: 0.8,
       autoTradingEnabled: true
     });
     

@@ -12,6 +12,8 @@ interface TradeDecisionPanelProps {
     ml_confidence_level?: number
     ml_confidence?: number
     confidence?: number
+    minConfidence?: number
+    autoTradingEnabled?: boolean
     ml_trade_recommendation?: string
     next_long_entry_level?: number
     next_short_entry_level?: number
@@ -42,12 +44,16 @@ export default function TradeDecisionPanel({ data = {} }: TradeDecisionPanelProp
 
   const mlConf = normalize(data.ml_confidence_level ?? data.ml_confidence ?? data.confidence)
 
+  const threshold = data.minConfidence ?? 0.7;
+
   const getTradeReasonText = () => {
     if (!data.position || data.position === 'Flat') {
       const conditions = []
       if (data.market_regime) conditions.push(`Market is ${data.market_regime}`)
       if (data.volatility_state) conditions.push(`Volatility is ${data.volatility_state}`)
-      if (data.ml_confidence_level && data.ml_confidence_level < 0.7) conditions.push('ML confidence below threshold')
+      if (data.ml_confidence_level && data.ml_confidence_level < threshold) {
+        conditions.push(`ML confidence below ${Math.round(threshold * 100)}% threshold`);
+      }
       if (data.rsi) {
         if (data.rsi > 70) conditions.push('RSI overbought')
         if (data.rsi < 30) conditions.push('RSI oversold')

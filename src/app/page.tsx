@@ -1,275 +1,81 @@
 'use client'
 
-import React, { useState } from 'react'
-import { TrendingUp, TrendingDown, Zap, Brain, Target, Shield, Activity, DollarSign, Clock, AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight, Minus, Settings } from 'lucide-react'
-import { useSocket } from '@/hooks/useSocket'
-import SettingsPanel from '@/components/SettingsPanel'
+import React, { useState, useEffect } from 'react'
+import { TrendingUp, TrendingDown, Zap, Brain, Target, Shield, Activity, DollarSign, Clock, AlertTriangle, CheckCircle2, ArrowUpRight, ArrowDownRight, Minus, Settings as SettingsIcon } from 'lucide-react'
+import { useSocket, RiskManagement, StrategyStatus, MarketData } from '@/hooks/useSocket'
+import SettingsPanel, { Settings } from '@/components/SettingsPanel'
 import Toast from '@/components/Toast'
+import TradeDecisionPanel from '@/components/TradeDecisionPanel'
 
-// Type interfaces for proper TypeScript support
-interface MarketData {
-  price?: number
-  volume?: number
-  rsi?: number
-  atr?: number
-  instrument?: string
-  [key: string]: any
-}
 
-interface StrategyStatus {
-  position?: string
-  position_size?: number
-  unrealized_pnl?: number
-  current_price?: number
-  overall_signal_strength?: number
-  signal_strength?: number
-  signal_probability_long?: number
-  signal_probability_short?: number
-  ml_confidence_level?: number
-  ml_confidence?: number
-  instrument?: string
-  entry_price?: number
-  next_long_entry_level?: number
-  next_short_entry_level?: number
-  rsi_current?: number
-  smart_trailing_active?: boolean
-  current_smart_stop?: number
-  active_trailing_algorithm?: string
-  [key: string]: any
-}
-
-interface RiskManagement {
-  daily_loss?: number
-  max_daily_loss?: number
-  consecutive_losses?: number
-  max_consecutive_losses?: number
-  trading_disabled?: boolean
-  autoTradingEnabled?: boolean
-  execThreshold?: number
-  [key: string]: any
-}
-
-interface TradeReadinessPanelProps {
-  position: string
-  currentPrice: number
-  mlConfidence: number
-  signalStrength: number
-  longProb: number
-  shortProb: number
-  riskManagement: RiskManagement
-  strategyStatus: StrategyStatus
-}
-
-// Inline TradeReadinessPanel component for now to ensure it works
-const TradeReadinessPanel = ({ position, currentPrice, mlConfidence, signalStrength, longProb, shortProb, riskManagement, strategyStatus }: TradeReadinessPanelProps) => {
-  // Get the actual execution threshold (convert from decimal to percentage)
-  const execThreshold = (riskManagement.execThreshold ?? 0.7) * 100
-
-  // Debug log to verify threshold is being passed correctly
-  console.log('TradeReadinessPanel - execThreshold:', execThreshold, 'from riskManagement:', riskManagement.execThreshold)
-
-  // TEMPORARILY ALWAYS SHOW - Remove this line to restore normal behavior
-  // if (position !== 'Flat') {
-  //   return null
-  // }
-
-  const calculateReadinessScore = () => {
-    let score = 0
-    if (mlConfidence >= execThreshold) score += 30
-    else if (mlConfidence >= 50) score += 15
-    
-    if (signalStrength >= 65) score += 30
-    else if (signalStrength >= 45) score += 15
-    
-    if (Math.max(longProb, shortProb) >= 60) score += 20
-    else if (Math.max(longProb, shortProb) >= 45) score += 10
-    
-    if (!riskManagement.trading_disabled) score += 20
-    
-    return score
-  }
-
-  const getReadinessStatus = (score: number) => {
-    if (score >= 80) return { text: 'READY TO TRADE', color: 'text-emerald-400' }
-    if (score >= 60) return { text: 'ALMOST READY', color: 'text-blue-400' }
-    if (score >= 40) return { text: 'BUILDING SETUP', color: 'text-amber-400' }
-    return { text: 'WAITING FOR SETUP', color: 'text-red-400' }
-  }
-
-  const readinessScore = calculateReadinessScore()
-  const readinessStatus = getReadinessStatus(readinessScore)
-
-  return (
-    <div className="p-6 rounded-2xl border border-amber-500/30 backdrop-blur-xl bg-amber-500/5 relative z-10">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center">
-            <Target className="w-6 h-6 text-amber-400" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-amber-400">Trade Readiness Analysis</h3>
-            <p className="text-sm text-amber-300/80">Real-time entry condition monitoring</p>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-2xl font-bold text-amber-400">
-            {Math.max(longProb, shortProb).toFixed(0)}%
-          </div>
-          <div className="text-xs text-amber-300">Best Signal</div>
-        </div>
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* Left Side - Entry Conditions */}
-        <div className="space-y-4">
-          <h4 className="font-semibold text-amber-300 mb-3">Entry Conditions</h4>
-          
-          {/* ML Confidence Check */}
-          <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50">
-            <div className="flex items-center gap-3">
-              <div className={`w-3 h-3 rounded-full ${
-                mlConfidence >= execThreshold ? 'bg-emerald-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm text-slate-300">ML Confidence</span>
-            </div>
-            <div className="text-right">
-              <div className={`font-bold ${
-                mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-red-400'
-              }`}>
-                {mlConfidence.toFixed(0)}%
-              </div>
-              <div className="text-xs text-slate-400">Need: {execThreshold.toFixed(0)}%+</div>
-            </div>
-          </div>
-
-          {/* Signal Strength Check */}
-          <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50">
-            <div className="flex items-center gap-3">
-              <div className={`w-3 h-3 rounded-full ${
-                signalStrength >= 65 ? 'bg-emerald-500' : 
-                signalStrength >= 45 ? 'bg-amber-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm text-slate-300">Signal Strength</span>
-            </div>
-            <div className="text-right">
-              <div className={`font-bold ${
-                signalStrength >= 65 ? 'text-emerald-400' : 
-                signalStrength >= 45 ? 'text-amber-400' : 'text-red-400'
-              }`}>
-                {signalStrength.toFixed(0)}%
-              </div>
-              <div className="text-xs text-slate-400">Need: 65%+</div>
-            </div>
-          </div>
-
-          {/* Risk Management Check */}
-          <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50">
-            <div className="flex items-center gap-3">
-              <div className={`w-3 h-3 rounded-full ${
-                !riskManagement.trading_disabled ? 'bg-emerald-500' : 'bg-red-500'
-              }`}></div>
-              <span className="text-sm text-slate-300">Risk Management</span>
-            </div>
-            <div className="text-right">
-              <div className={`font-bold ${
-                !riskManagement.trading_disabled ? 'text-emerald-400' : 'text-red-400'
-              }`}>
-                {!riskManagement.trading_disabled ? 'CLEAR' : 'BLOCKED'}
-              </div>
-              <div className="text-xs text-slate-400">Status</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Side - Entry Levels & Overall Score */}
-        <div className="space-y-4">
-          <h4 className="font-semibold text-amber-300 mb-3">Entry Proximity</h4>
-          
-          {/* Overall Readiness Score */}
-          <div className="p-4 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
-            <div className="text-center">
-              <div className="text-sm text-blue-300 mb-1">Overall Readiness</div>
-              <div className={`text-3xl font-bold mb-2 ${readinessStatus.color}`}>
-                {readinessScore}%
-              </div>
-              <div className={`text-xs ${readinessStatus.color}`}>
-                {readinessStatus.text}
-              </div>
-            </div>
-          </div>
-
-          {/* Entry Levels */}
-          {strategyStatus.next_long_entry_level && (
-            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-              <div className="text-sm text-emerald-400 font-medium">Long Entry</div>
-              <div className="text-lg font-bold text-emerald-400">{strategyStatus.next_long_entry_level.toFixed(2)}</div>
-              <div className="text-xs text-slate-400">
-                {Math.abs(currentPrice - strategyStatus.next_long_entry_level).toFixed(2)} pts away
-              </div>
-            </div>
-          )}
-
-          {strategyStatus.next_short_entry_level && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-              <div className="text-sm text-red-400 font-medium">Short Entry</div>
-              <div className="text-lg font-bold text-red-400">{strategyStatus.next_short_entry_level.toFixed(2)}</div>
-              <div className="text-xs text-slate-400">
-                {Math.abs(currentPrice - strategyStatus.next_short_entry_level).toFixed(2)} pts away
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Blocking Factors */}
-      <div className="mt-6">
-        <h4 className="font-semibold text-amber-300 mb-3">Current Blockers</h4>
-        <div className="space-y-2">
-          {mlConfidence < execThreshold && (
-            <div className="flex items-center gap-3 p-2 rounded bg-red-500/10 text-red-300 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              ML confidence too low ({mlConfidence.toFixed(0)}% &lt; {execThreshold.toFixed(0)}%)
-            </div>
-          )}
-          {signalStrength < 65 && (
-            <div className="flex items-center gap-3 p-2 rounded bg-red-500/10 text-red-300 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              Signal strength insufficient ({signalStrength.toFixed(0)}% &lt; 65%)
-            </div>
-          )}
-          {Math.max(longProb, shortProb) < 60 && (
-            <div className="flex items-center gap-3 p-2 rounded bg-red-500/10 text-red-300 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              No clear directional bias ({Math.max(longProb, shortProb).toFixed(0)}% &lt; 60%)
-            </div>
-          )}
-          {riskManagement.trading_disabled && (
-            <div className="flex items-center gap-3 p-2 rounded bg-red-500/10 text-red-300 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              Risk management has disabled trading
-            </div>
-          )}
-          
-          {/* Show success message if ready */}
-          {readinessScore >= 80 && (
-            <div className="flex items-center gap-3 p-2 rounded bg-emerald-500/10 text-emerald-300 text-sm">
-              <Target className="w-4 h-4" />
-              All entry conditions satisfied - ready for trade signal
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 const TradingDashboard = () => {
   const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, getCurrentSettings, sendManualTrade } = useSocket()
   const [selectedTimeframe, setSelectedTimeframe] = useState('1m')
   const [showSettings, setShowSettings] = useState(false)
   const [tradeToast, setTradeToast] = useState<string | null>(null)
+
+  // Initialize settings from strategyData if available, otherwise use defaults
+  const [settings, setSettings] = useState<Settings>(() => ({
+    minConfidence: strategyData?.riskManagement?.minConfidence ?? 0.6,
+    strongConfidence: strategyData?.riskManagement?.strongConfidence ?? 0.8,
+    minStrength: strategyData?.riskManagement?.minStrength ?? 0.2,
+    autoTradingEnabled: strategyData?.riskManagement?.autoTradingEnabled ?? false,
+    modelWeights: strategyData?.riskManagement?.ensembleWeights ?? {
+      lstm: 0.3,
+      transformer: 0.25,
+      randomForest: 0.2,
+      xgboost: 0.15,
+      dqn: 0.1
+    },
+    trailingConfidenceThreshold: strategyData?.riskManagement?.trailingConfidenceThreshold ?? 0.6,
+    trailingUpdateInterval: strategyData?.riskManagement?.trailingUpdateInterval ?? 15,
+    maxStopMovementAtr: strategyData?.riskManagement?.maxStopMovementAtr ?? 2,
+    minProfitTarget: strategyData?.riskManagement?.minProfitTarget ?? 25,
+    maxPositionSize: strategyData?.riskManagement?.maxPositionSize ?? 100000,
+    maxDailyRisk: strategyData?.riskManagement?.maxDailyRisk ?? 1000,
+    volatilityAdjustment: strategyData?.riskManagement?.volatilityAdjustment ?? 0,
+    patternConfidenceThreshold: strategyData?.riskManagement?.patternConfidenceThreshold ?? 0.7,
+    regimeChangeThreshold: strategyData?.riskManagement?.regimeChangeThreshold ?? 0.8,
+    momentumThreshold: strategyData?.riskManagement?.momentumThreshold ?? 0.6,
+    breakoutStrength: strategyData?.riskManagement?.breakoutStrength ?? 0.7,
+    clearDirectionThreshold: strategyData?.riskManagement?.clearDirectionThreshold ?? 0.6
+  }))
+
+  // Update settings when strategyData changes
+  useEffect(() => {
+    const riskManagement = strategyData?.riskManagement;
+    if (!riskManagement) return;
+
+    console.log('Received new risk management data:', riskManagement);
+    setSettings(prev => ({
+      ...prev,
+      minConfidence: riskManagement.minConfidence ?? prev.minConfidence,
+      strongConfidence: riskManagement.strongConfidence ?? prev.strongConfidence,
+      minStrength: riskManagement.minStrength ?? prev.minStrength,
+      autoTradingEnabled: riskManagement.autoTradingEnabled ?? prev.autoTradingEnabled,
+      modelWeights: riskManagement.ensembleWeights ?? prev.modelWeights,
+      trailingConfidenceThreshold: riskManagement.trailingConfidenceThreshold ?? prev.trailingConfidenceThreshold,
+      trailingUpdateInterval: riskManagement.trailingUpdateInterval ?? prev.trailingUpdateInterval,
+      maxStopMovementAtr: riskManagement.maxStopMovementAtr ?? prev.maxStopMovementAtr,
+      minProfitTarget: riskManagement.minProfitTarget ?? prev.minProfitTarget,
+      maxPositionSize: riskManagement.maxPositionSize ?? prev.maxPositionSize,
+      maxDailyRisk: riskManagement.maxDailyRisk ?? prev.maxDailyRisk,
+      volatilityAdjustment: riskManagement.volatilityAdjustment ?? prev.volatilityAdjustment,
+      patternConfidenceThreshold: riskManagement.patternConfidenceThreshold ?? prev.patternConfidenceThreshold,
+      regimeChangeThreshold: riskManagement.regimeChangeThreshold ?? prev.regimeChangeThreshold,
+      momentumThreshold: riskManagement.momentumThreshold ?? prev.momentumThreshold,
+      breakoutStrength: riskManagement.breakoutStrength ?? prev.breakoutStrength,
+      clearDirectionThreshold: riskManagement.clearDirectionThreshold ?? prev.clearDirectionThreshold
+    }));
+  }, [strategyData?.riskManagement])
+
+  // Handle settings update
+  const handleSettingsUpdate = async (newSettings: Settings) => {
+    console.log('Updating settings:', newSettings);
+    setSettings(newSettings);
+    await updateServerSettings(newSettings);
+  }
 
   const executeTrade = async (payload: { command: string; quantity?: number; instrument?: string }) => {
     // Ensure instrument is included
@@ -291,34 +97,40 @@ const TradingDashboard = () => {
   }
 
   // Extract data with fallbacks
-  const marketData: MarketData = strategyData.marketData || {}
-  const strategyStatus: StrategyStatus = strategyData.strategyStatus || {}
-  const riskManagement: RiskManagement = strategyData.riskManagement || {}
-  const lastTrade = strategyData.lastTrade || {}
+  const marketData = strategyData?.marketData as MarketData;
+  const strategyStatus = strategyData?.strategyStatus as StrategyStatus;
+  const riskManagement: RiskManagement = {
+    ...strategyData?.riskManagement,
+    minConfidence: settings.minConfidence,  // Use settings.minConfidence
+    daily_loss: strategyData?.riskManagement?.daily_loss ?? 0,
+    consecutive_losses: strategyData?.riskManagement?.consecutive_losses ?? 0,
+    trading_disabled: strategyData?.riskManagement?.trading_disabled ?? false
+  } as RiskManagement;
+  const lastTrade = strategyData?.lastTrade ?? {};
 
   // Derived values with better fallbacks
-  const position = strategyStatus.position || 'Flat'
-  const positionSize = strategyStatus.position_size || 0
-  const pnl = strategyStatus.unrealized_pnl || 0
-  const currentPrice = marketData.price || strategyStatus.current_price || 0
-  const signalStrength = strategyStatus.overall_signal_strength || strategyStatus.signal_strength || 0
-  const longProb = strategyStatus.signal_probability_long || 0
-  const shortProb = strategyStatus.signal_probability_short || 0
+  const position = strategyStatus?.position || 'Flat'
+  const positionSize = strategyStatus?.position_size || 0
+  const pnl = strategyStatus?.unrealized_pnl || 0
+  const currentPrice = marketData?.price || strategyStatus?.current_price || 0
+  const signalStrength = strategyStatus?.overall_signal_strength || strategyStatus?.signal_strength || 0
+  const longProb = strategyStatus?.signal_probability_long || 0
+  const shortProb = strategyStatus?.signal_probability_short || 0
   
   // ML Confidence with multiple fallbacks and proper normalization
-  let mlConfidence = strategyStatus.ml_confidence_level || strategyStatus.ml_confidence || mlPrediction?.confidence || 0.5
+  let mlConfidence = strategyStatus?.ml_confidence_level || strategyStatus?.ml_confidence || mlPrediction?.confidence || 0.5
   // If it's already a percentage (>1), keep as is, otherwise convert to percentage
   if (mlConfidence <= 1) {
     mlConfidence = mlConfidence * 100
   }
   
-  const instrument = marketData.instrument || strategyStatus.instrument || 'ES'
+  const instrument = marketData?.instrument || strategyStatus?.instrument || 'ES'
 
   // Auto trading status - check multiple possible locations
-  const autoTradingEnabled = riskManagement.autoTradingEnabled ?? strategyStatus.autoTradingEnabled ?? true
+  const autoTradingEnabled = riskManagement?.autoTradingEnabled ?? strategyStatus?.autoTradingEnabled ?? true
 
   // Get the actual execution threshold from server (default to 0.7 if not available)
-  const execThreshold = (riskManagement.execThreshold ?? strategyStatus.execThreshold ?? 0.7) * 100 // Convert to percentage
+  const execThreshold = (riskManagement?.minConfidence ?? 0.7) * 100 // Convert to percentage
 
   // Dynamic colors and status
   const getPositionColor = () => {
@@ -340,8 +152,30 @@ const TradingDashboard = () => {
     return val >= 0 ? `+$${formatted}` : `-$${formatted}`
   }
 
+  // Risk Limits Section
+  const dailyLossLimit = riskManagement?.maxDailyRisk ?? 0;
+  const consecutiveLossesLimit = 3; // Default limit - using fixed value since maxConsecutiveLosses doesn't exist
+
+  // Risk Limit Checks
+  const isOverDailyLoss = (riskManagement?.daily_loss ?? 0) >= dailyLossLimit;
+  const isOverConsecutiveLosses = (riskManagement?.consecutive_losses ?? 0) >= consecutiveLossesLimit;
+
+  // Risk Limit Status
+  const riskLimitStatus = {
+    dailyLoss: {
+      current: riskManagement?.daily_loss ?? 0,
+      limit: riskManagement?.maxDailyRisk ?? 0,
+      isOver: isOverDailyLoss
+    },
+    consecutiveLosses: {
+      current: riskManagement?.consecutive_losses ?? 0,
+      limit: consecutiveLossesLimit,
+      isOver: isOverConsecutiveLosses
+    }
+  };
+
   // Show loading state if no data yet
-  if (!currentPrice && !marketData.price) {
+  if (!currentPrice && !marketData?.price) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white flex items-center justify-center">
         <div className="text-center">
@@ -406,7 +240,7 @@ const TradingDashboard = () => {
               onClick={() => setShowSettings(!showSettings)}
               className="p-2 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:bg-slate-700/50 transition-colors"
             >
-              <Settings className="w-5 h-5" />
+              <SettingsIcon className="w-5 h-5" />
             </button>
           </div>
         </div>
@@ -454,7 +288,7 @@ const TradingDashboard = () => {
               {currentPrice.toFixed(2)}
             </div>
             <div className="text-sm text-slate-400 mt-1">
-              Vol: {marketData.volume ? (marketData.volume / 1000000).toFixed(1) + 'M' : '--'}
+              Vol: {marketData?.volume ? (marketData?.volume / 1000000).toFixed(1) + 'M' : '--'}
             </div>
           </div>
 
@@ -487,183 +321,331 @@ const TradingDashboard = () => {
         <div className="grid grid-cols-3 gap-6">
           {/* AI Signal Analysis */}
           <div className="col-span-2 space-y-6 relative z-10">
-            {/* Auto Trading Status Panel */}
-            <div className="p-6 rounded-2xl border border-blue-500/30 backdrop-blur-xl bg-blue-500/5">
+            {/* Trading Intelligence Panel - Fixed Height */}
+            <div className="p-6 rounded-xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/40 h-[580px] flex flex-col">
+              {/* Header */}
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                    <Brain className="w-6 h-6 text-blue-400" />
+                  <div className="w-10 h-10 bg-slate-800/60 rounded-lg flex items-center justify-center">
+                    <Brain className="w-6 h-6 text-slate-300" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-blue-400">Auto Trading System</h3>
-                    <p className="text-sm text-blue-300/80">Real-time activation monitoring</p>
+                    <h3 className="text-xl font-bold text-slate-200">Trading Intelligence Center</h3>
+                    <p className="text-sm text-slate-400">AI-powered trade readiness & execution monitoring</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-blue-400">
-                    {mlConfidence.toFixed(0)}%
+                
+                {/* Overall Status Badge */}
+                <div className={`px-4 py-2 rounded-lg border ${
+                  (autoTradingEnabled && mlConfidence >= execThreshold && 
+                   Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100) && !riskManagement.trading_disabled) 
+                    ? 'bg-green-900/30 border-green-600/40 text-green-300' 
+                    : 'bg-slate-800/60 border-slate-600/50 text-slate-300'
+                }`}>
+                  <div className="text-sm font-medium">
+                    {(autoTradingEnabled && mlConfidence >= execThreshold && 
+                      Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100) && !riskManagement.trading_disabled) 
+                      ? 'READY TO TRADE' : 'AWAITING SIGNAL'}
                   </div>
-                  <div className="text-xs text-blue-300">Current Confidence</div>
                 </div>
               </div>
 
+              {/* Main Metrics Grid */}
               <div className="grid grid-cols-4 gap-4 mb-6">
+                {/* ML Confidence */}
+                <div className="p-4 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400 font-medium">ML Confidence</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-2xl font-bold ${
+                      mlConfidence >= execThreshold ? 'text-green-300' : 'text-amber-300'
+                    }`}>
+                      {mlConfidence.toFixed(0)}%
+                    </span>
+                    <span className="text-sm text-slate-500">/ {execThreshold.toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-slate-700 rounded-full h-2 mt-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all duration-500 ${
+                        mlConfidence >= execThreshold ? 'bg-green-500' : 'bg-amber-500'
+                      }`}
+                      style={{ width: `${Math.min(mlConfidence, 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Signal Strength */}
+                <div className="p-4 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400 font-medium">Signal Power</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-2xl font-bold ${
+                      signalStrength >= 65 ? 'text-green-300' : 
+                      signalStrength >= 45 ? 'text-amber-300' : 'text-red-300'
+                    }`}>
+                      {signalStrength.toFixed(0)}%
+                    </span>
+                    <span className="text-sm text-slate-500">strength</span>
+                  </div>
+                  <div className="w-full bg-slate-700 rounded-full h-2 mt-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all duration-500 ${
+                        signalStrength >= 65 ? 'bg-green-500' : 
+                        signalStrength >= 45 ? 'bg-amber-500' : 'bg-red-500'
+                      }`}
+                      style={{ width: `${Math.min(signalStrength, 100)}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Directional Bias */}
+                <div className="p-4 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Target className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400 font-medium">Direction</span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-xl font-bold ${
+                      Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100) ? 
+                        (longProb > shortProb ? 'text-green-300' : 'text-red-300') : 
+                        'text-slate-400'
+                    }`}>
+                      {longProb > shortProb && longProb > (settings.clearDirectionThreshold * 100) ? 'LONG' : 
+                       shortProb > longProb && shortProb > (settings.clearDirectionThreshold * 100) ? 'SHORT' : 'NEUTRAL'}
+                    </span>
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    {Math.max(longProb, shortProb).toFixed(0)}% / {(settings.clearDirectionThreshold * 100).toFixed(0)}%
+                  </div>
+                </div>
+
                 {/* Auto Trading Status */}
-                <div className="p-4 rounded-lg bg-slate-800/50">
-                  <div className="text-sm text-slate-400 mb-2">Auto Trading</div>
-                  <div className={`text-lg font-bold ${
-                    autoTradingEnabled ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {autoTradingEnabled ? 'ENABLED' : 'DISABLED'}
+                <div className="p-4 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Shield className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm text-slate-400 font-medium">Auto Trading</span>
                   </div>
-                  <div className="text-xs text-slate-400">System Status</div>
-                </div>
-
-                {/* Confidence vs Threshold */}
-                <div className="p-4 rounded-lg bg-slate-800/50">
-                  <div className="text-sm text-slate-400 mb-2">Threshold Check</div>
-                  <div className={`text-lg font-bold ${
-                    mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-orange-400'
-                  }`}>
-                    {mlConfidence.toFixed(0)}% / {execThreshold.toFixed(0)}%
+                  <div className="flex items-baseline gap-2">
+                    <span className={`text-xl font-bold ${
+                      autoTradingEnabled && !riskManagement.trading_disabled ? 'text-green-300' : 'text-red-300'
+                    }`}>
+                      {autoTradingEnabled && !riskManagement.trading_disabled ? 'ACTIVE' : 'DISABLED'}
+                    </span>
                   </div>
-                  <div className="text-xs text-slate-400">
-                    {mlConfidence >= execThreshold ? 'PASSING' : 'BELOW THRESHOLD'}
-                  </div>
-                </div>
-
-                {/* Signal Direction */}
-                <div className="p-4 rounded-lg bg-slate-800/50">
-                  <div className="text-sm text-slate-400 mb-2">Signal Direction</div>
-                  <div className={`text-lg font-bold ${
-                    Math.max(longProb, shortProb) > 60 ? 
-                      (longProb > shortProb ? 'text-emerald-400' : 'text-red-400') : 
-                      'text-slate-400'
-                  }`}>
-                    {longProb > shortProb && longProb > 60 ? 'LONG' : 
-                     shortProb > longProb && shortProb > 60 ? 'SHORT' : 'NEUTRAL'}
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {Math.max(longProb, shortProb).toFixed(0)}% confidence
-                  </div>
-                </div>
-
-                {/* Risk Management */}
-                <div className="p-4 rounded-lg bg-slate-800/50">
-                  <div className="text-sm text-slate-400 mb-2">Risk Status</div>
-                  <div className={`text-lg font-bold ${
-                    !riskManagement.trading_disabled ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {!riskManagement.trading_disabled ? 'CLEAR' : 'BLOCKED'}
-                  </div>
-                  <div className="text-xs text-slate-400">
+                  <div className="text-sm text-slate-500">
                     {riskManagement.consecutive_losses || 0} losses
                   </div>
                 </div>
               </div>
 
-              {/* Auto Trading Conditions */}
-              <div className="space-y-3">
-                <h4 className="font-semibold text-blue-300 mb-3">Activation Requirements</h4>
-                
-                {/* Condition 1: Auto Trading Enabled */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      autoTradingEnabled ? 'bg-emerald-500' : 'bg-red-500'
-                    }`}></div>
-                    <span className="text-sm text-slate-300">Auto Trading Enabled</span>
-                  </div>
-                  <div className={`text-sm font-medium ${
-                    autoTradingEnabled ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {autoTradingEnabled ? '✓ ENABLED' : '✗ DISABLED'}
-                  </div>
-                </div>
-
-                {/* Condition 2: ML Confidence */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      mlConfidence >= execThreshold ? 'bg-emerald-500' : 'bg-orange-500'
-                    }`}></div>
-                    <span className="text-sm text-slate-300">ML Confidence ≥ {execThreshold.toFixed(0)}%</span>
-                  </div>
-                  <div className={`text-sm font-medium ${
-                    mlConfidence >= execThreshold ? 'text-emerald-400' : 'text-orange-400'
-                  }`}>
-                    {mlConfidence.toFixed(1)}% {mlConfidence >= execThreshold ? '✓' : '✗'}
-                  </div>
-                </div>
-
-                {/* Condition 3: Clear Signal Direction */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      Math.max(longProb, shortProb) > 60 ? 'bg-emerald-500' : 'bg-amber-500'
-                    }`}></div>
-                    <span className="text-sm text-slate-300">Clear Direction ≥ 60%</span>
-                  </div>
-                  <div className={`text-sm font-medium ${
-                    Math.max(longProb, shortProb) > 60 ? 'text-emerald-400' : 'text-amber-400'
-                  }`}>
-                    {Math.max(longProb, shortProb).toFixed(1)}% {Math.max(longProb, shortProb) > 60 ? '✓' : '✗'}
-                  </div>
-                </div>
-
-                {/* Condition 4: Risk Management Clear */}
-                <div className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      !riskManagement.trading_disabled ? 'bg-emerald-500' : 'bg-red-500'
-                    }`}></div>
-                    <span className="text-sm text-slate-300">Risk Management Clear</span>
-                  </div>
-                  <div className={`text-sm font-medium ${
-                    !riskManagement.trading_disabled ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {!riskManagement.trading_disabled ? '✓ CLEAR' : '✗ BLOCKED'}
-                  </div>
-                </div>
-
-                {/* Overall Status */}
-                <div className="mt-4 p-4 rounded-lg bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Target className="w-6 h-6 text-blue-400" />
-                      <div>
-                        <div className="font-bold text-blue-400">System Status</div>
-                        <div className="text-sm text-slate-400">Next trade will execute when all conditions are met</div>
+              {/* Entry Levels & Conditions - Flex 1 to fill remaining space */}
+              <div className="grid grid-cols-3 gap-6 flex-1">
+                {/* Entry Conditions Checklist */}
+                <div className="col-span-2 flex flex-col">
+                  <h4 className="font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5" />
+                    Entry Conditions
+                  </h4>
+                  
+                  {/* Fixed height container for conditions */}
+                  <div className="space-y-2 flex-1">
+                    {[
+                      {
+                        label: 'Auto Trading Enabled',
+                        condition: autoTradingEnabled,
+                        value: autoTradingEnabled ? 'ENABLED' : 'DISABLED'
+                      },
+                      {
+                        label: `ML Confidence ≥ ${execThreshold.toFixed(0)}%`,
+                        condition: mlConfidence >= execThreshold,
+                        value: `${mlConfidence.toFixed(1)}%`
+                      },
+                      {
+                        label: `Clear Direction ≥ ${(settings.clearDirectionThreshold * 100).toFixed(0)}%`,
+                        condition: Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100),
+                        value: `${Math.max(longProb, shortProb).toFixed(1)}%`
+                      },
+                      {
+                        label: 'Risk Management Clear',
+                        condition: !riskManagement.trading_disabled,
+                        value: !riskManagement.trading_disabled ? 'CLEAR' : 'BLOCKED'
+                      }
+                    ].map((item, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/40 border border-slate-700/40">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-3 h-3 rounded-full ${
+                            item.condition ? 'bg-green-500' : 'bg-slate-500'
+                          }`}></div>
+                          <span className="text-sm text-slate-300">{item.label}</span>
+                        </div>
+                        <div className={`text-sm font-medium ${
+                          item.condition ? 'text-green-300' : 'text-slate-400'
+                        }`}>
+                          {item.value}
+                        </div>
                       </div>
+                    ))}
+
+                    {/* Fixed height status area */}
+                    <div className="mt-4 h-[60px] flex items-start">
+                      {(() => {
+                        const blockers = [];
+                        if (!autoTradingEnabled) blockers.push('Auto trading disabled');
+                        if (mlConfidence < execThreshold) blockers.push(`ML confidence too low (${mlConfidence.toFixed(0)}% < ${execThreshold.toFixed(0)}%)`);
+                        if (Math.max(longProb, shortProb) <= (settings.clearDirectionThreshold * 100)) blockers.push(`No clear directional bias (${Math.max(longProb, shortProb).toFixed(0)}% ≤ ${(settings.clearDirectionThreshold * 100).toFixed(0)}%)`);
+                        if (riskManagement.trading_disabled) blockers.push('Risk management has disabled trading');
+                        
+                        return blockers.length > 0 ? (
+                          <div className="w-full p-3 rounded-lg bg-red-900/20 border border-red-700/30">
+                            <h5 className="text-sm font-medium text-red-300 mb-1 flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4" />
+                              Blockers ({blockers.length})
+                            </h5>
+                            <div className="text-xs text-red-300/70 truncate">
+                              {blockers[0]}{blockers.length > 1 && ` +${blockers.length - 1} more`}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-full p-3 rounded-lg bg-green-900/20 border border-green-700/30">
+                            <div className="flex items-center gap-2 text-green-300">
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span className="text-sm font-medium">All conditions satisfied</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
-                    <div className={`text-2xl font-bold ${
-                      (autoTradingEnabled && mlConfidence >= execThreshold && 
-                       Math.max(longProb, shortProb) > 60 && !riskManagement.trading_disabled) ? 
-                       'text-emerald-400' : 'text-orange-400'
+                  </div>
+                </div>
+
+                {/* Entry Levels - Fixed structure */}
+                <div className="flex flex-col">
+                  <h4 className="font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                    <Target className="w-5 h-5" />
+                    Entry Levels
+                  </h4>
+                  
+                  {/* Fixed height containers for entry levels */}
+                  <div className="space-y-3 flex-1">
+                    {/* Long Entry - Always present */}
+                    <div className={`p-4 rounded-lg border h-[80px] flex flex-col justify-center ${
+                      strategyStatus.next_long_entry_level 
+                        ? 'bg-green-900/20 border-green-700/30' 
+                        : 'bg-slate-800/20 border-slate-700/30'
                     }`}>
-                      {(autoTradingEnabled && mlConfidence >= execThreshold && 
-                        Math.max(longProb, shortProb) > 60 && !riskManagement.trading_disabled) ? 
-                        'READY TO TRADE' : 'WAITING'}
+                      {strategyStatus.next_long_entry_level ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-1">
+                            <ArrowUpRight className="w-4 h-4 text-green-300" />
+                            <span className="text-sm text-green-300 font-medium">Long Entry</span>
+                          </div>
+                          <div className="text-lg font-bold text-green-300">{strategyStatus.next_long_entry_level.toFixed(2)}</div>
+                          <div className="text-xs text-slate-400">
+                            {Math.abs(currentPrice - strategyStatus.next_long_entry_level).toFixed(2)} pts away
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center">
+                          <div className="text-sm text-slate-500">Long Entry</div>
+                          <div className="text-xs text-slate-600 mt-1">No level set</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Short Entry - Always present */}
+                    <div className={`p-4 rounded-lg border h-[80px] flex flex-col justify-center ${
+                      strategyStatus.next_short_entry_level 
+                        ? 'bg-red-900/20 border-red-700/30' 
+                        : 'bg-slate-800/20 border-slate-700/30'
+                    }`}>
+                      {strategyStatus.next_short_entry_level ? (
+                        <>
+                          <div className="flex items-center gap-2 mb-1">
+                            <ArrowDownRight className="w-4 h-4 text-red-300" />
+                            <span className="text-sm text-red-300 font-medium">Short Entry</span>
+                          </div>
+                          <div className="text-lg font-bold text-red-300">{strategyStatus.next_short_entry_level.toFixed(2)}</div>
+                          <div className="text-xs text-slate-400">
+                            {Math.abs(currentPrice - strategyStatus.next_short_entry_level).toFixed(2)} pts away
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center">
+                          <div className="text-sm text-slate-500">Short Entry</div>
+                          <div className="text-xs text-slate-600 mt-1">No level set</div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Overall Readiness Score - Fixed height */}
+                    <div className="p-4 rounded-lg bg-slate-800/40 border border-slate-700/50 h-[100px] flex flex-col justify-center">
+                      <div className="text-center">
+                        <div className="text-sm text-slate-400 mb-1">Readiness Score</div>
+                        <div className={`text-2xl font-bold mb-1 ${
+                          (() => {
+                            let score = 0;
+                            if (autoTradingEnabled) score += 25;
+                            if (mlConfidence >= execThreshold) score += 30;
+                            if (signalStrength >= 65) score += 25;
+                            if (Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100)) score += 20;
+                            
+                            if (score >= 80) return 'text-green-300';
+                            if (score >= 60) return 'text-blue-300';
+                            if (score >= 40) return 'text-amber-300';
+                            return 'text-slate-400';
+                          })()
+                        }`}>
+                          {(() => {
+                            let score = 0;
+                            if (autoTradingEnabled) score += 25;
+                            if (mlConfidence >= execThreshold) score += 30;
+                            if (signalStrength >= 65) score += 25;
+                            if (Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100)) score += 20;
+                            return score;
+                          })()}%
+                        </div>
+                        <div className={`text-xs ${
+                          (() => {
+                            let score = 0;
+                            if (autoTradingEnabled) score += 25;
+                            if (mlConfidence >= execThreshold) score += 30;
+                            if (signalStrength >= 65) score += 25;
+                            if (Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100)) score += 20;
+                            
+                            if (score >= 80) return 'text-green-300';
+                            if (score >= 60) return 'text-blue-300';
+                            if (score >= 40) return 'text-amber-300';
+                            return 'text-slate-400';
+                          })()
+                        }`}>
+                          {(() => {
+                            let score = 0;
+                            if (autoTradingEnabled) score += 25;
+                            if (mlConfidence >= execThreshold) score += 30;
+                            if (signalStrength >= 65) score += 25;
+                            if (Math.max(longProb, shortProb) > (settings.clearDirectionThreshold * 100)) score += 20;
+                            
+                            if (score >= 80) return 'READY TO TRADE';
+                            if (score >= 60) return 'ALMOST READY';
+                            if (score >= 40) return 'BUILDING SETUP';
+                            return 'WAITING FOR SETUP';
+                          })()}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Trade Readiness Panel */}
-            <TradeReadinessPanel
-              position={position}
-              currentPrice={currentPrice}
-              mlConfidence={mlConfidence}
-              signalStrength={signalStrength}
-              longProb={longProb}
-              shortProb={shortProb}
-              riskManagement={riskManagement}
-              strategyStatus={strategyStatus}
-            />
+            <TradeDecisionPanel data={{ ...strategyStatus, ...riskManagement }} />
 
             {/* Signal Direction */}
-            <div className="p-6 rounded-2xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/30">
+            <div className="p-6 rounded-2xl border border-blue-500/30 backdrop-blur-xl bg-blue-500/5 relative z-10">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold">AI Signal Analysis</h3>
                 <div className="flex items-center gap-2">
@@ -758,26 +740,26 @@ const TradingDashboard = () => {
               <div className="grid grid-cols-3 gap-4">
                 <div className="p-4 bg-slate-800/50 rounded-xl">
                   <div className="text-sm text-slate-400 mb-2">RSI (14)</div>
-                  <div className="text-2xl font-bold text-white">{(marketData.rsi || strategyStatus.rsi_current || 50).toFixed(1)}</div>
+                  <div className="text-2xl font-bold text-white">{(marketData?.rsi || strategyStatus?.rsi_current || strategyStatus?.rsi || 50).toFixed(1)}</div>
                   <div className="w-full bg-slate-700 rounded-full h-1 mt-2">
                     <div 
                       className={`h-1 rounded-full transition-all duration-1000 ${
-                        (marketData.rsi || strategyStatus.rsi_current || 50) > 70 ? 'bg-red-500' : 
-                        (marketData.rsi || strategyStatus.rsi_current || 50) < 30 ? 'bg-emerald-500' : 'bg-blue-500'
+                        (marketData?.rsi || strategyStatus?.rsi_current || strategyStatus?.rsi || 50) > 70 ? 'bg-red-500' : 
+                        (marketData?.rsi || strategyStatus?.rsi_current || strategyStatus?.rsi || 50) < 30 ? 'bg-emerald-500' : 'bg-blue-500'
                       }`}
-                      style={{ width: `${marketData.rsi || strategyStatus.rsi_current || 50}%` }}
+                      style={{ width: `${marketData?.rsi || strategyStatus?.rsi_current || strategyStatus?.rsi || 50}%` }}
                     ></div>
                   </div>
                 </div>
                 <div className="p-4 bg-slate-800/50 rounded-xl">
                   <div className="text-sm text-slate-400 mb-2">ATR</div>
-                  <div className="text-2xl font-bold text-white">{(marketData.atr || 15).toFixed(2)}</div>
+                  <div className="text-2xl font-bold text-white">{(marketData?.atr || 15).toFixed(2)}</div>
                   <div className="text-xs text-slate-400 mt-1">Volatility</div>
                 </div>
                 <div className="p-4 bg-slate-800/50 rounded-xl">
                   <div className="text-sm text-slate-400 mb-2">Volume</div>
                   <div className="text-2xl font-bold text-white">
-                    {marketData.volume ? (marketData.volume / 1000000).toFixed(1) + 'M' : '--'}
+                    {marketData?.volume ? (marketData?.volume / 1000000).toFixed(1) + 'M' : '--'}
                   </div>
                   <div className="text-xs text-slate-400 mt-1">Contracts</div>
                 </div>
@@ -806,12 +788,12 @@ const TradingDashboard = () => {
                     <div 
                       className={`h-2 rounded-full ${(riskManagement.daily_loss || 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
                       style={{ 
-                        width: `${Math.min(Math.abs(riskManagement.daily_loss || 0) / (riskManagement.max_daily_loss || 5000) * 100, 100)}%` 
+                        width: `${Math.min(Math.abs(riskManagement.daily_loss || 0) / (riskManagement.maxDailyRisk || 5000) * 100, 100)}%` 
                       }}
                     ></div>
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
-                    Max Loss: ${(riskManagement.max_daily_loss || 5000).toLocaleString()}
+                    Max Loss: ${(riskManagement.maxDailyRisk || 5000).toLocaleString()}
                   </div>
                 </div>
 
@@ -819,14 +801,14 @@ const TradingDashboard = () => {
                   <div className="flex justify-between text-sm mb-1">
                     <span className="text-slate-400">Consecutive Losses</span>
                     <span className="text-orange-400">
-                      {riskManagement.consecutive_losses || 0} / {riskManagement.max_consecutive_losses || 5}
+                      {riskManagement.consecutive_losses || 0} / {consecutiveLossesLimit}
                     </span>
                   </div>
                   <div className="w-full bg-slate-700 rounded-full h-2">
                     <div 
                       className="h-2 bg-orange-500 rounded-full"
                       style={{ 
-                        width: `${((riskManagement.consecutive_losses || 0) / (riskManagement.max_consecutive_losses || 5)) * 100}%` 
+                        width: `${((riskManagement.consecutive_losses || 0) / (riskManagement.maxConsecutiveLosses || 5)) * 100}%` 
                       }}
                     ></div>
                   </div>
@@ -951,7 +933,11 @@ const TradingDashboard = () => {
 
       {showSettings && (
         <div className="fixed top-20 right-6 z-50">
-          <SettingsPanel onSave={updateServerSettings} getCurrentSettings={getCurrentSettings} />
+          <SettingsPanel
+            settings={settings}
+            setSettings={setSettings}
+            onSave={handleSettingsUpdate}
+          />
         </div>
       )}
       {tradeToast && (

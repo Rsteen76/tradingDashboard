@@ -1,9 +1,17 @@
 {
-  "execThreshold": 0.75,
+  "minConfidence": 0.47,
   "autoTradingEnabled": true,
-  "minConfidence": 0.70,
-  "strongConfidence": 0.85,
-  "minStrength": 0.5,
-  "rateLimitMs": 5000,
-  "validationRequired": true
+  "strongConfidence": 0.8,
+  "minStrength": 0.2,
+  "trailingConfidenceThreshold": 0.6,
+  "trailingUpdateInterval": 15,
+  "maxStopMovementAtr": 2,
+  "minProfitTarget": 25,
+  "maxPositionSize": 100000,
+  "maxDailyRisk": 1000,
+  "volatilityAdjustment": 0,
+  "patternConfidenceThreshold": 0.7,
+  "regimeChangeThreshold": 0.8,
+  "momentumThreshold": 0.6,
+  "breakoutStrength": 0.7
 }

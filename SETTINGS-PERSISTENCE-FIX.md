@@ -28,17 +28,19 @@ function persistSettings() {
 ```javascript
 // Send current settings when dashboard connects
 dashboardSocket.emit('current_settings', {
-  execThreshold: runtimeSettings.execThreshold,
+  minConfidence: runtimeSettings.minConfidence,
   autoTradingEnabled: runtimeSettings.autoTradingEnabled
 })
 
-// Handle explicit settings requests
+// Handle request for current settings
 dashboardSocket.on('get_settings', (ack) => {
-  ack({
-    success: true,
-    execThreshold: runtimeSettings.execThreshold,
-    autoTradingEnabled: runtimeSettings.autoTradingEnabled
-  })
+  if (typeof ack === 'function') {
+    ack({
+      success: true,
+      minConfidence: runtimeSettings.minConfidence,
+      autoTradingEnabled: runtimeSettings.autoTradingEnabled
+    })
+  }
 })
 ```
 

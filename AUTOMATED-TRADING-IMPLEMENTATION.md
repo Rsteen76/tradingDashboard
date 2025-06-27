@@ -27,13 +27,11 @@
 ## 🔧 How It Works
 
 ### Automated Trading Flow:
-1. **Market Data Received** → `handleMarketData()`
-2. **Check If Auto Trading Enabled** → `runtimeSettings.autoTradingEnabled`
-3. **Generate ML Prediction** → `predictionService.generatePrediction()`
-4. **Evaluate Confidence** → Compare to `runtimeSettings.execThreshold`
-5. **Generate Command** → Create `go_long`, `go_short`, or no action
-6. **Send to NinjaTrader** → Same path as manual trades
-7. **Execute Trade** → NinjaTrader handles via existing command handlers
+1. **Receive Market Data** → Socket.IO event from NinjaTrader
+2. **Generate ML Prediction** → Call ML Engine
+3. **Calculate Confidence** → Based on multiple factors
+4. **Evaluate Confidence** → Compare to `runtimeSettings.minConfidence`
+5. **Execute Trade** → If confidence exceeds threshold
 
 ### Command Format (Same as Manual):
 ```json
@@ -114,12 +112,12 @@ Tests:
 ### Environment Variables:
 ```bash
 AUTO_TRADING_ENABLED=false  # Default state
-EXEC_THRESHOLD=0.7          # Default confidence threshold
+MIN_CONFIDENCE=0.7         # Default confidence threshold
 ```
 
 ### Runtime Settings (Adjustable via Dashboard):
 - `runtimeSettings.autoTradingEnabled` - Master on/off switch
-- `runtimeSettings.execThreshold` - Minimum confidence (0-1)
+- `runtimeSettings.minConfidence` - Minimum confidence (0-1)
 
 ## ✅ Ready to Use
 
