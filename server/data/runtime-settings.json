@@ -1,7 +1,9 @@
 {
-  "execThreshold": 0.4,
+  "execThreshold": 0.75,
   "autoTradingEnabled": true,
-  "minConfidence": 0.42,
-  "strongConfidence": 0.8,
-  "minStrength": 0.2
+  "minConfidence": 0.70,
+  "strongConfidence": 0.85,
+  "minStrength": 0.5,
+  "rateLimitMs": 5000,
+  "validationRequired": true
 }

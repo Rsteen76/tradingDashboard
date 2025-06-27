@@ -180,7 +180,28 @@ class DataCollector extends EventEmitter {
      */
     processMarketData(rawData) {
         try {
-            // Standardize the data format
+            // Log raw data for debugging
+            this.logger.debug('Processing raw market data:', {
+                fields: Object.keys(rawData),
+                hasPrice: Boolean(rawData.price || rawData.last),
+                hasInstrument: Boolean(rawData.instrument),
+                hasATR: Boolean(rawData.atr)
+            });
+
+            // Required fields validation
+            const missingFields = [];
+            if (!rawData.price && !rawData.last) missingFields.push('price/last');
+            if (!rawData.instrument) missingFields.push('instrument');
+            if (!rawData.atr) missingFields.push('atr');
+
+            if (missingFields.length > 0) {
+                this.logger.warn('Missing required market data fields:', {
+                    missingFields,
+                    usingDefaults: true
+                });
+            }
+
+            // Standardize the data format with detailed logging
             const processed = {
                 instrument: rawData.instrument || 'ES',
                 price: parseFloat(rawData.price || rawData.last || 0),
@@ -189,24 +210,39 @@ class DataCollector extends EventEmitter {
                 bid: parseFloat(rawData.bid || rawData.price || 0),
                 ask: parseFloat(rawData.ask || rawData.price || 0),
                 
-                // Technical indicators (if provided)
-                rsi: parseFloat(rawData.rsi || 50),
-                atr: parseFloat(rawData.atr || 1.0),
-                ema_alignment: parseFloat(rawData.ema_alignment || 0),
+                // Technical indicators with validation
+                rsi: this.validateIndicator('RSI', rawData.rsi, 0, 100, 50),
+                atr: this.validateIndicator('ATR', rawData.atr, 0, Infinity, rawData.price ? rawData.price * 0.001 : 1.0),
+                ema_alignment: this.validateIndicator('EMA_ALIGNMENT', rawData.ema_alignment, -100, 100, 0),
                 
-                // Additional fields
-                change: parseFloat(rawData.change || 0),
-                change_percent: parseFloat(rawData.change_percent || 0),
+                // Additional fields with validation
+                change: this.validateIndicator('CHANGE', rawData.change, -Infinity, Infinity, 0),
+                change_percent: this.validateIndicator('CHANGE_PERCENT', rawData.change_percent, -100, 100, 0),
                 
                 // Metadata
                 source: rawData.source || 'ninja_trader',
                 processed_at: new Date().toISOString()
             };
-            
+
             // Calculate derived values
             if (processed.bid && processed.ask) {
                 processed.spread = processed.ask - processed.bid;
                 processed.mid_price = (processed.bid + processed.ask) / 2;
+            }
+
+            // Validate final processed data
+            const invalidFields = Object.entries(processed)
+                .filter(([key, value]) => value === null || value === undefined || isNaN(value))
+                .map(([key]) => key);
+
+            if (invalidFields.length > 0) {
+                this.logger.warn('Invalid fields in processed market data:', {
+                    invalidFields,
+                    values: invalidFields.reduce((acc, key) => ({
+                        ...acc,
+                        [key]: processed[key]
+                    }), {})
+                });
             }
             
             // Store in cache for later retrieval
@@ -215,18 +251,48 @@ class DataCollector extends EventEmitter {
             return processed;
             
         } catch (error) {
-            this.logger.error('Error processing market data:', error.message);
+            this.logger.error('Error processing market data:', {
+                error: error.message,
+                rawData: Object.keys(rawData)
+            });
             
-            // Return a safe fallback
+            // Return a safe fallback with error flag
             return {
-                instrument: 'ES',
-                price: 0,
+                instrument: rawData.instrument || 'ES',
+                price: parseFloat(rawData.price || rawData.last || 0),
                 volume: 0,
                 timestamp: new Date().toISOString(),
                 error: true,
-                error_message: error.message
+                error_message: error.message,
+                validation_failed: true
             };
         }
+    }
+
+    /**
+     * Validate and normalize a technical indicator value
+     * @param {string} name Indicator name
+     * @param {number} value Raw value
+     * @param {number} min Minimum valid value
+     * @param {number} max Maximum valid value
+     * @param {number} defaultValue Default value if invalid
+     * @returns {number} Validated and normalized value
+     */
+    validateIndicator(name, value, min, max, defaultValue) {
+        const parsed = parseFloat(value);
+        
+        if (isNaN(parsed) || parsed < min || parsed > max) {
+            this.logger.warn(`Invalid ${name} value:`, {
+                received: value,
+                parsed,
+                min,
+                max,
+                usingDefault: defaultValue
+            });
+            return defaultValue;
+        }
+        
+        return parsed;
     }
 
     // Collect ML predictions and confidence levels

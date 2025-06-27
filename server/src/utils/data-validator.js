@@ -20,97 +20,134 @@ class DataValidator {
       atr: { min: 0, max: 1000 },
       ema: { min: 0, max: 1000000 }
     };
+
+    this.defaultValues = {
+      instrument: 'ES',
+      price: 0,
+      volume: 0,
+      rsi: 50,
+      atr: 1.0,
+      ema_alignment: 0,
+      timestamp: () => new Date().toISOString()
+    };
   }
 
   validateMarketData(data) {
     const issues = [];
+    const warnings = [];
     
-    // Only validate critical fields, be more permissive
+    // Basic type check
     if (!data || typeof data !== 'object') {
-      issues.push('Invalid data: must be an object');
+      return {
+        isValid: false,
+        errors: ['Invalid data: must be an object'],
+        warnings: [],
+        sanitizedData: this.getDefaultData()
+      };
     }
     
-    // Price is the only truly critical field
+    // Validate and sanitize each field
+    const sanitizedData = { ...this.getDefaultData() };
+
+    // Handle price (critical field)
+    if (data.price === undefined && data.last !== undefined) {
+      data.price = data.last; // Support 'last' as alias for 'price'
+    }
+    
     if (!data.price || typeof data.price !== 'number' || data.price <= 0) {
       issues.push('Invalid price: must be a positive number');
+    } else {
+      sanitizedData.price = data.price;
     }
-    
-    // Warn about questionable values but don't fail validation
-    if (data.volume !== undefined && data.volume < 0) {
-      logger.warn('Negative volume detected, will be sanitized');
+
+    // Handle instrument
+    if (!data.instrument) {
+      warnings.push('Missing instrument field, using default');
+      sanitizedData.instrument = this.defaultValues.instrument;
+    } else {
+      sanitizedData.instrument = data.instrument;
     }
-    
-    if (data.rsi !== undefined && (data.rsi < 0 || data.rsi > 100)) {
-      logger.warn('RSI out of range, will be clamped');
+
+    // Handle volume
+    if (data.volume !== undefined) {
+      if (typeof data.volume !== 'number' || data.volume < 0) {
+        warnings.push(`Invalid volume value (${data.volume}), using default`);
+        sanitizedData.volume = this.defaultValues.volume;
+      } else {
+        sanitizedData.volume = data.volume;
+      }
     }
-    
-    if (data.atr !== undefined && data.atr < 0) {
-      logger.warn('Negative ATR detected, will be sanitized');
+
+    // Handle RSI
+    if (data.rsi !== undefined) {
+      const rsiValue = parseFloat(data.rsi);
+      if (isNaN(rsiValue) || rsiValue < 0 || rsiValue > 100) {
+        warnings.push(`RSI out of range (${data.rsi}), clamping to valid range`);
+        sanitizedData.rsi = Math.min(100, Math.max(0, isNaN(rsiValue) ? 50 : rsiValue));
+      } else {
+        sanitizedData.rsi = rsiValue;
+      }
     }
-    
-    // Only throw for critical issues
-    if (issues.length > 0) {
-      throw new ValidationError(issues);
+
+    // Handle ATR
+    if (data.atr !== undefined) {
+      const atrValue = parseFloat(data.atr);
+      if (isNaN(atrValue) || atrValue <= 0) {
+        warnings.push(`Invalid ATR value (${data.atr}), using default`);
+        sanitizedData.atr = sanitizedData.price ? sanitizedData.price * 0.001 : this.defaultValues.atr;
+      } else {
+        sanitizedData.atr = atrValue;
+      }
+    } else {
+      warnings.push('Missing ATR field, using default');
+      sanitizedData.atr = sanitizedData.price ? sanitizedData.price * 0.001 : this.defaultValues.atr;
     }
-    
-    return true;
+
+    // Add timestamp if missing
+    if (!data.timestamp) {
+      sanitizedData.timestamp = this.defaultValues.timestamp();
+    } else {
+      sanitizedData.timestamp = data.timestamp;
+    }
+
+    // Log all warnings
+    if (warnings.length > 0) {
+      warnings.forEach(warning => logger.warn(`⚠️ ${warning}`));
+    }
+
+    return {
+      isValid: issues.length === 0,
+      errors: issues,
+      warnings,
+      sanitizedData
+    };
+  }
+
+  getDefaultData() {
+    return {
+      instrument: this.defaultValues.instrument,
+      price: this.defaultValues.price,
+      volume: this.defaultValues.volume,
+      rsi: this.defaultValues.rsi,
+      atr: this.defaultValues.atr,
+      ema_alignment: this.defaultValues.ema_alignment,
+      timestamp: this.defaultValues.timestamp()
+    };
   }
 
   sanitizeData(data) {
-    const sanitized = { ...data };
-    
-    // Clamp RSI to valid range
-    if (sanitized.rsi !== undefined) {
-      sanitized.rsi = Math.max(0, Math.min(100, sanitized.rsi));
-    }
-    
-    // Ensure positive price
-    if (sanitized.price !== undefined) {
-      sanitized.price = Math.max(0.01, sanitized.price);
-    }
-    
-    // Ensure non-negative volume
-    if (sanitized.volume !== undefined) {
-      sanitized.volume = Math.max(0, sanitized.volume);
-    }
-    
-    // Ensure non-negative ATR
-    if (sanitized.atr !== undefined) {
-      sanitized.atr = Math.max(0, sanitized.atr);
-    }
-    
-    // Set defaults for missing critical fields
-    if (!sanitized.instrument) {
-      sanitized.instrument = 'Unknown';
-    }
-    
-    if (!sanitized.timestamp) {
-      sanitized.timestamp = new Date().toISOString();
-    }
-    
-    return sanitized;
+    const validationResult = this.validateMarketData(data);
+    return validationResult.sanitizedData;
   }
 
   validatePredictionRequest(data) {
-    const issues = [];
+    const validationResult = this.validateMarketData(data);
     
-    if (!data || typeof data !== 'object') {
-      issues.push('Request data must be an object');
+    if (!validationResult.isValid) {
+      throw new ValidationError(validationResult.errors);
     }
     
-    if (!data.price || typeof data.price !== 'number') {
-      issues.push('Price is required and must be a number');
-    }
-    
-    if (data.rsi !== undefined && (typeof data.rsi !== 'number' || data.rsi < 0 || data.rsi > 100)) {
-      issues.push('RSI must be a number between 0 and 100');
-    }
-    
-    if (issues.length > 0) {
-      throw new ValidationError(issues);
-    }
-    
-    return this.sanitizeData(data);
+    return validationResult.sanitizedData;
   }
 }
 

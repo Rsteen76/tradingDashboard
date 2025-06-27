@@ -218,7 +218,10 @@ class MLTradingServer {
                             command: tradingOpportunity.command,
                             instrument: tradingOpportunity.instrument,
                             quantity: tradingOpportunity.quantity,
-                            timestamp: tradingOpportunity.timestamp
+                            timestamp: tradingOpportunity.timestamp,
+                            entry_price: tradingOpportunity.entry_price,
+                            stop_price: tradingOpportunity.stop_price,
+                            target_price: tradingOpportunity.target_price
                         });
 
                         logger.info('📡 Trading command sent to NinjaTrader:', {

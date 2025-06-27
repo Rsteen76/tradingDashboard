@@ -225,7 +225,7 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         case 'tick_data':
-          this.emit('tickData', jsonData);
+          this.emit('tickData', this.validateTickData(jsonData));
           break;
           
         case 'strategy_status':
@@ -233,7 +233,16 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         case 'market_data':
-          this.emit('marketData', jsonData);
+          const validatedData = this.validateMarketData(jsonData);
+          if (validatedData.isValid) {
+            this.emit('marketData', validatedData.data);
+          } else {
+            logger.warn('⚠️ Invalid market data received:', {
+              clientId,
+              errors: validatedData.errors,
+              data: jsonData
+            });
+          }
           break;
           
         case 'trade_execution':
@@ -253,20 +262,115 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         default:
-          logger.debug('📥 Unknown message type:', { 
+          logger.warn('⚠️ Unknown message type:', {
             type: jsonData.type,
-            clientId 
+            clientId
           });
           this.emit('unknownMessage', jsonData, socket);
       }
       
     } catch (error) {
-      logger.error('❌ Error parsing JSON message:', { 
-        clientId,
+      logger.error('❌ Error processing message:', {
         error: error.message,
-        message: message.substring(0, 200) + '...'
+        clientId,
+        messagePreview: message.substring(0, 200)
       });
     }
+  }
+
+  validateMarketData(data) {
+    const errors = [];
+    const validated = { ...data };
+
+    // Required fields
+    if (!data.instrument) {
+      errors.push('Missing instrument');
+      validated.instrument = 'ES';
+    }
+
+    if (!data.price && !data.last) {
+      errors.push('Missing price/last');
+      validated.price = 0;
+    } else {
+      validated.price = parseFloat(data.price || data.last);
+      if (isNaN(validated.price)) {
+        errors.push('Invalid price format');
+        validated.price = 0;
+      }
+    }
+
+    // Technical indicators
+    if (!data.atr) {
+      errors.push('Missing ATR');
+      validated.atr = validated.price ? validated.price * 0.001 : 1.0;
+    } else {
+      validated.atr = parseFloat(data.atr);
+      if (isNaN(validated.atr) || validated.atr <= 0) {
+        errors.push('Invalid ATR value');
+        validated.atr = validated.price ? validated.price * 0.001 : 1.0;
+      }
+    }
+
+    // Optional fields with validation
+    if (data.volume !== undefined) {
+      validated.volume = parseInt(data.volume);
+      if (isNaN(validated.volume) || validated.volume < 0) {
+        logger.warn('⚠️ Invalid volume, using default', {
+          received: data.volume,
+          using: 0
+        });
+        validated.volume = 0;
+      }
+    }
+
+    if (data.rsi !== undefined) {
+      validated.rsi = parseFloat(data.rsi);
+      if (isNaN(validated.rsi) || validated.rsi < 0 || validated.rsi > 100) {
+        logger.warn('⚠️ Invalid RSI, using default', {
+          received: data.rsi,
+          using: 50
+        });
+        validated.rsi = 50;
+      }
+    }
+
+    // Add validation timestamp
+    validated.validated_at = new Date().toISOString();
+    validated.validation_errors = errors;
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+      data: validated
+    };
+  }
+
+  validateTickData(data) {
+    const validated = { ...data };
+    
+    // Ensure numeric price
+    if (data.price) {
+      validated.price = parseFloat(data.price);
+      if (isNaN(validated.price)) {
+        logger.warn('⚠️ Invalid tick price, using last valid', {
+          received: data.price
+        });
+        validated.price = 0;
+      }
+    }
+    
+    // Ensure numeric volume
+    if (data.volume) {
+      validated.volume = parseInt(data.volume);
+      if (isNaN(validated.volume) || validated.volume < 0) {
+        logger.warn('⚠️ Invalid tick volume, using 0', {
+          received: data.volume
+        });
+        validated.volume = 0;
+      }
+    }
+    
+    return validated;
   }
 
   isStrategyConfirmationMessage(jsonData) {

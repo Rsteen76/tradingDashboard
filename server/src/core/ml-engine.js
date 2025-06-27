@@ -31,7 +31,9 @@ class MLEngine {
     // Runtime settings (from your existing runtimeSettings)
     this.runtimeSettings = {
       execThreshold: this.config.execThreshold,
-      autoTradingEnabled: this.config.autoTradingEnabled
+      autoTradingEnabled: this.config.autoTradingEnabled,
+      rateLimitMs: 5000,
+      validationRequired: true
     };
     
     // Caching and performance (from your existing code)
@@ -54,6 +56,7 @@ class MLEngine {
     };
     
     this.isInitialized = false;
+    this.lastTradeTime = 0;
   }
 
   async initialize() {
@@ -174,21 +177,33 @@ class MLEngine {
 
   validateAndSanitizeInput(marketData) {
     try {
-      // Use your existing data validation logic
-      this.dataValidator.validateMarketData(marketData);
-      return this.dataValidator.sanitizeData(marketData);
+      // Use data validation logic
+      const validationResult = this.dataValidator.validateMarketData(marketData);
+      
+      // Log validation warnings if any
+      if (validationResult.warnings.length > 0) {
+        logger.debug('Data validation warnings:', {
+          warnings: validationResult.warnings,
+          data: marketData
+        });
+      }
+
+      // If validation failed but we have sanitized data, use it
+      if (!validationResult.isValid) {
+        logger.warn('⚠️ Data validation failed, using sanitized data:', {
+          errors: validationResult.errors,
+          original: marketData,
+          sanitized: validationResult.sanitizedData
+        });
+      }
+
+      return validationResult.sanitizedData;
+
     } catch (error) {
-      logger.warn('⚠️ Data validation failed, using raw data:', error.message);
-      return {
-        instrument: marketData.instrument || 'Unknown',
-        price: marketData.price || 0,
-        rsi: marketData.rsi || 50,
-        ema_alignment: marketData.ema_alignment || 0,
-        atr: marketData.atr || 1.0,
-        volume: marketData.volume || 1000,
-        timestamp: marketData.timestamp || new Date().toISOString(),
-        ...marketData
-      };
+      logger.error('❌ Data validation error:', error.message);
+      
+      // Return safe defaults
+      return this.dataValidator.getDefaultData();
     }
   }
 
@@ -327,7 +342,27 @@ class MLEngine {
       return null;
     }
 
+    // Rate limiting check
+    const now = Date.now();
+    const timeSinceLastTrade = now - this.lastTradeTime;
+    if (timeSinceLastTrade < this.runtimeSettings.rateLimitMs) {
+      logger.warn('⏳ Rate limit enforced - skipping trade evaluation', {
+        timeSinceLastMs: timeSinceLastTrade,
+        rateLimitMs: this.runtimeSettings.rateLimitMs
+      });
+      return null;
+    }
+
     try {
+      // Strict data validation
+      if (this.runtimeSettings.validationRequired) {
+        const validationResult = this.validateMarketData(marketData);
+        if (!validationResult.isValid) {
+          logger.warn('⚠️ Data validation failed, skipping trade evaluation:', validationResult.errors);
+          return null;
+        }
+      }
+
       const prediction = await this.generatePrediction(marketData);
       const threshold = this.runtimeSettings.execThreshold;
       
@@ -350,6 +385,10 @@ class MLEngine {
           requiredThreshold: (threshold * 100).toFixed(1) + '%',
           direction: prediction.direction
         });
+        
+        // Update last trade time
+        this.lastTradeTime = now;
+        
         return this.generateTradingCommand(prediction, marketData);
       } else {
         logger.info('⏸️ Auto trade threshold NOT met', {
@@ -365,6 +404,26 @@ class MLEngine {
       logger.error('❌ Trading opportunity evaluation failed:', error);
       return null;
     }
+  }
+
+  validateMarketData(data) {
+    const validationResult = this.dataValidator.validateMarketData(data);
+    
+    // Log validation details
+    if (!validationResult.isValid) {
+      logger.warn('⚠️ Market data validation failed:', {
+        errors: validationResult.errors,
+        warnings: validationResult.warnings,
+        receivedData: {
+          price: data.price,
+          instrument: data.instrument,
+          atr: data.atr,
+          volume: data.volume
+        }
+      });
+    }
+    
+    return validationResult;
   }
 
   generateTradingCommand(prediction, marketData) {

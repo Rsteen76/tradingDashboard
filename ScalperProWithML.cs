@@ -315,6 +315,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 					Print($"🛑 ML Command '{cmd}' rejected: Circuit breakers active");
 					return;
 				}
+
+				// Duplicate trade prevention
+				if ((cmd == "go_long" || cmd == "go_short") && !ValidateNewTradeRequest(command))
+				{
+					Print($"🛑 ML Command '{cmd}' rejected: Duplicate or invalid trade");
+					return;
+				}
 				
 				switch (cmd)
 				{
@@ -386,6 +393,72 @@ namespace NinjaTrader.NinjaScript.Strategies
 			catch (Exception ex)
 			{
 				Print($"Error handling ML command: {ex.Message}");
+			}
+		}
+
+		private bool ValidateNewTradeRequest(Dictionary<string, object> command)
+		{
+			try
+			{
+				// Don't enter if already in position
+				if (Position.MarketPosition != MarketPosition.Flat)
+				{
+					Print($"📊 ML trade rejected: Already in {Position.MarketPosition} position");
+					return false;
+				}
+
+				// Parse command parameters
+				double entryPrice = ParseDouble(command, "entry_price", 0);
+				double stopPrice = ParseDouble(command, "stop_price", 0);
+				double targetPrice = ParseDouble(command, "target_price", 0);
+				
+				// Validate prices
+				if (entryPrice <= 0 || stopPrice <= 0 || targetPrice <= 0)
+				{
+					Print("❌ ML trade rejected: Invalid price levels");
+					return false;
+				}
+				
+				// Validate risk-reward ratio
+				string cmd = command["command"].ToString();
+				double riskRewardRatio;
+				
+				if (cmd == "go_long")
+				{
+					double risk = entryPrice - stopPrice;
+					double reward = targetPrice - entryPrice;
+					riskRewardRatio = reward / risk;
+				}
+				else // go_short
+				{
+					double risk = stopPrice - entryPrice;
+					double reward = entryPrice - targetPrice;
+					riskRewardRatio = reward / risk;
+				}
+				
+				if (riskRewardRatio < minRiskRewardRatio)
+				{
+					Print($"❌ ML trade rejected: Risk-reward ratio too low ({riskRewardRatio:F2} < {minRiskRewardRatio:F2})");
+					return false;
+				}
+				
+				// Validate ATR-based risk
+				double atrValue = atr[0];
+				double maxRiskATR = 2.0; // Maximum risk of 2x ATR
+				double riskInATR = Math.Abs(entryPrice - stopPrice) / atrValue;
+				
+				if (riskInATR > maxRiskATR)
+				{
+					Print($"❌ ML trade rejected: Risk too high ({riskInATR:F1}x ATR > {maxRiskATR:F1}x ATR)");
+					return false;
+				}
+				
+				return true;
+			}
+			catch (Exception ex)
+			{
+				Print($"❌ Error validating trade request: {ex.Message}");
+				return false;
 			}
 		}
 		
