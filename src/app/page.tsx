@@ -844,11 +844,11 @@ const TradingDashboard = () => {
               </div>
               
               <div className={`p-3 rounded-lg flex items-center gap-2 mb-4 ${
-                strategyStatus.smart_trailing_active 
+                strategyStatus?.smart_trailing_active 
                   ? 'bg-purple-500/10 border border-purple-500/30' 
                   : 'bg-slate-800/50 border border-slate-700/50'
               }`}>
-                {strategyStatus.smart_trailing_active ? (
+                {strategyStatus?.smart_trailing_active ? (
                   <>
                     <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
                     <span className="text-purple-400 font-medium">AI Active</span>
@@ -865,20 +865,22 @@ const TradingDashboard = () => {
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Current Stop</span>
                   <span className="text-white font-mono">
-                    {strategyStatus.smart_trailing_active ? (strategyStatus.current_smart_stop?.toFixed(2) || '--') : '--'}
+                    {strategyStatus?.current_smart_stop ? strategyStatus.current_smart_stop.toFixed(2) : '--'}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Algorithm</span>
                   <span className="text-purple-400">
-                    {strategyStatus.smart_trailing_active ? (strategyStatus.active_trailing_algorithm || 'Neural') : 'None'}
+                    {strategyStatus?.active_trailing_algorithm ? 
+                      strategyStatus.active_trailing_algorithm.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 
+                      'None'}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Protection</span>
                   <span className="text-emerald-400">
-                    {strategyStatus.smart_trailing_active && strategyStatus.entry_price && strategyStatus.current_smart_stop ? 
-                      formatCurrency(Math.abs(strategyStatus.current_smart_stop - strategyStatus.entry_price) * (positionSize || 1) * 50) : 
+                    {strategyStatus?.current_smart_stop && strategyStatus?.entry_price && positionSize ? 
+                      formatCurrency(Math.abs(strategyStatus.current_smart_stop - strategyStatus.entry_price) * positionSize * 50) : 
                       '$0.00'
                     }
                   </span>

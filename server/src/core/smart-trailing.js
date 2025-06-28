@@ -26,7 +26,46 @@ class SmartTrailing {
 
             const startTime = Date.now();
             
-            // Multi-factor analysis
+            // Handle manual trades with special care
+            if (positionData.isManual) {
+                // Use adaptive ATR for manual trades by default
+                const manualTrailingStop = await this.trailingAlgorithms.adaptiveATRTrailing(
+                    positionData,
+                    marketData,
+                    { volatility: { level: 0.5 }, regime: { type: 'manual' } }
+                );
+                
+                // Ensure we don't move the stop too aggressively for manual trades
+                const currentStop = positionData.current_smart_stop || 0;
+                if (currentStop > 0) {
+                    const maxMove = marketData.atr * 0.5; // Max 0.5 ATR move per update
+                    if (positionData.direction === 'LONG') {
+                        manualTrailingStop.stopPrice = Math.min(
+                            manualTrailingStop.stopPrice,
+                            currentStop + maxMove
+                        );
+                    } else {
+                        manualTrailingStop.stopPrice = Math.max(
+                            manualTrailingStop.stopPrice,
+                            currentStop - maxMove
+                        );
+                    }
+                }
+                
+                return {
+                    stopPrice: manualTrailingStop.stopPrice,
+                    algorithm: 'adaptive_atr',
+                    confidence: 0.8,
+                    reasoning: 'Manual trade using adaptive ATR trailing',
+                    metadata: {
+                        regime: 'manual',
+                        volatility: 'moderate',
+                        processingTime: Date.now() - startTime
+                    }
+                };
+            }
+            
+            // Regular automated trade processing
             const regime = await this.regimeAnalyzer.analyzeRegime(marketData);
             const volatility = await this.volatilityPredictor.predictVolatility(marketData);
             const srLevels = await this.srAnalyzer.findKeyLevels(marketData);

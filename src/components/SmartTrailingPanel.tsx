@@ -30,6 +30,10 @@ interface SmartTrailingPanelProps {
     target_price?: number
     target1?: number
     target2?: number
+    
+    // Manual trade data
+    is_manual_trade?: boolean
+    manual_stop?: number
   }
   isLoading?: boolean
 }
@@ -44,8 +48,9 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
   // Extract smart trailing data
   const isEnabled = data.smart_trailing_enabled ?? true
   const isActive = data.smart_trailing_active ?? false
-  const currentStop = data.current_smart_stop || 0
-  const algorithm = data.active_trailing_algorithm || 'none'
+  const isManualTrade = data.is_manual_trade ?? false
+  const currentStop = isManualTrade ? (data.manual_stop || 0) : (data.current_smart_stop || 0)
+  const algorithm = isManualTrade ? 'adaptive_atr' : (data.active_trailing_algorithm || 'none')
   const confidenceThreshold = data.trailing_confidence_threshold || 0.6
   const updateInterval = data.trailing_update_interval || 15
   const maxMovement = data.max_stop_movement_atr || 0.5
@@ -77,11 +82,14 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
   const stopDistanceATR = atr > 0 ? stopDistance / atr : 0
   const timeSinceUpdate = lastUpdate > 0 ? lastUpdate : 0
   
-  // Calculate profit protection
+  // Calculate profit protection with proper rounding
   const profitProtected = hasPosition && entryPrice > 0 && currentStop > 0 ? 
-    (position === 'Long' ? 
-      Math.max(0, currentStop - entryPrice) : 
-      Math.max(0, entryPrice - currentStop)) : 0
+    position === 'Long' ? 
+      Math.max(0, ((currentStop - entryPrice) / entryPrice) * 100) : 
+      Math.max(0, ((entryPrice - currentStop) / entryPrice) * 100) : 0;
+  
+  // Round to 2 decimal places
+  const displayProfitProtected = Math.round(profitProtected * 100) / 100;
   
   // Algorithm performance data (simulated - would come from ML server in real implementation)
   const algorithmPerformance = {
@@ -119,14 +127,16 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
       }
     }
     
-    if (isActive && algorithm !== 'none') {
+    if (isActive || (isManualTrade && currentStop > 0)) {
       return {
         status: 'ACTIVE',
         color: 'text-green-400',
         bgColor: 'bg-green-500/10',
         borderColor: 'border-green-500/30',
         icon: '🤖',
-        description: `AI managing with ${algorithm.replace('_', ' ')} algorithm`
+        description: isManualTrade ? 
+          'Managing manual trade with adaptive ATR' :
+          `AI managing with ${algorithm.replace('_', ' ')} algorithm`
       }
     }
     
@@ -195,181 +205,77 @@ const SmartTrailingPanel: React.FC<SmartTrailingPanelProps> = ({ data = {}, isLo
         ))}
       </div>
 
-      {/* Status Tab */}
+      {/* Status Tab Content */}
       {activeTab === 'status' && (
         <div className="space-y-4">
-          {/* Current Status */}
-          <div className={`p-4 rounded-lg border ${trailingStatus.bgColor} ${trailingStatus.borderColor}`}>
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-xl">{trailingStatus.icon}</span>
-              <div>
-                <h4 className={`font-bold ${trailingStatus.color}`}>{trailingStatus.status}</h4>
-                <p className="text-sm text-gray-400">{trailingStatus.description}</p>
-              </div>
+          {/* Current Stop Level */}
+          <div className="bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Current Stop</span>
+              <span className={`text-lg font-semibold ${currentStop > 0 ? 'text-white' : 'text-gray-500'}`}>
+                {currentStop > 0 ? currentStop.toFixed(2) : 'Not Set'}
+              </span>
             </div>
-            
-            {isActive && algorithm !== 'none' && (
-              <div className="mt-3 pt-3 border-t border-gray-700/50">
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div className="space-y-1">
-                    <span className="text-gray-400">Algorithm</span>
-                    <div className="font-medium text-white">{algorithm.replace('_', ' ')}</div>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <span className="text-gray-400">Stop Price</span>
-                    <div className="font-medium text-red-400">${currentStop.toFixed(2)}</div>
-                  </div>
-                  {displayTarget > 0 && (
-                    <>
-                      <div className="space-y-1">
-                        <span className="text-gray-400">Target Price</span>
-                        <div className="font-medium text-green-400">${displayTarget.toFixed(2)}</div>
-                      </div>
-                      <div className="space-y-1 text-right">
-                        <span className="text-gray-400">Distance to Target</span>
-                        <div className="font-medium">{currentPrice > 0 ? Math.abs(currentPrice - displayTarget).toFixed(2) : 'N/A'} pts</div>
-                      </div>
-                    </>
-                  )}
-                  <div className="space-y-1">
-                    <span className="text-gray-400">Stop Distance</span>
-                    <div className="font-medium">{stopDistance.toFixed(2)} pts {atr > 0 ? `(${stopDistanceATR.toFixed(2)}x ATR)` : ''}</div>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <span className="text-gray-400">Profit Protected</span>
-                    <div className="font-medium text-green-400">{profitProtected.toFixed(2)} pts</div>
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Distance</span>
+              <span className="text-gray-400">{stopDistance.toFixed(1)} ({stopDistanceATR.toFixed(1)} ATR)</span>
+            </div>
           </div>
 
-          {/* Position & Stop Details */}
-          {hasPosition && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-gray-800/50 rounded-lg p-3">
-                <div className="text-xs text-gray-400 mb-1">Current Stop</div>
-                <div className="text-lg font-bold text-white">
-                  {currentStop > 0 ? currentStop.toFixed(2) : 'Not Set'}
-                </div>
-                {stopDistanceATR > 0 && (
-                  <div className="text-xs text-gray-500">{stopDistanceATR.toFixed(1)} ATR away</div>
-                )}
-              </div>
-              
-              <div className="bg-gray-800/50 rounded-lg p-3">
-                <div className="text-xs text-gray-400 mb-1">Profit Protected</div>
-                <div className={`text-lg font-bold ${profitProtected > 0 ? 'text-green-400' : 'text-gray-400'}`}>
-                  {profitProtected > 0 ? `$${profitProtected.toFixed(2)}` : '$0.00'}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {entryPrice > 0 ? `Entry: ${entryPrice.toFixed(2)}` : 'No entry price'}
-                </div>
-              </div>
+          {/* Protection Level */}
+          <div className="bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Profit Protected</span>
+              <span className={`text-lg font-semibold ${displayProfitProtected > 0 ? 'text-emerald-400' : 'text-gray-500'}`}>
+                {displayProfitProtected > 0 ? `${displayProfitProtected}%` : '0%'}
+              </span>
             </div>
-          )}
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Algorithm</span>
+              <span className="text-gray-400">{algorithm.replace('_', ' ')}</span>
+            </div>
+          </div>
 
-          {/* Real-time Metrics */}
-          {isActive && (
-            <div className="bg-gradient-to-r from-green-500/10 to-blue-500/10 border border-green-500/20 rounded-lg p-4">
-              <h5 className="text-sm font-medium text-white mb-3">Real-time Metrics</h5>
-              <div className="grid grid-cols-3 gap-4 text-xs">
-                <div className="text-center">
-                  <div className="text-gray-400">Update Interval</div>
-                  <div className="text-white font-bold">{updateInterval}s</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Max Movement</div>
-                  <div className="text-white font-bold">{maxMovement} ATR</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Last Update</div>
-                  <div className="text-white font-bold">{timeSinceUpdate.toFixed(0)}s ago</div>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Status Description */}
+          <div className="bg-gray-800/50 rounded-lg p-4">
+            <p className="text-sm text-gray-400">{trailingStatus.description}</p>
+          </div>
         </div>
       )}
 
-      {/* Settings Tab */}
+      {/* Settings Tab Content */}
       {activeTab === 'settings' && (
         <div className="space-y-4">
-          <div className="text-center text-gray-500 py-8">
-            <span className="text-2xl mb-2 block">⚙️</span>
-            <p className="mb-4">Smart Trailing Settings</p>
-            <div className="space-y-3 text-left max-w-sm mx-auto">
-              <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg">
-                <span className="text-sm">Enabled</span>
-                <span className={`text-sm font-bold ${isEnabled ? 'text-green-400' : 'text-red-400'}`}>
-                  {isEnabled ? 'ON' : 'OFF'}
-                </span>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg">
-                <span className="text-sm">Confidence Threshold</span>
-                <span className="text-sm font-bold text-blue-400">{(confidenceThreshold * 100).toFixed(0)}%</span>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg">
-                <span className="text-sm">Update Interval</span>
-                <span className="text-sm font-bold text-purple-400">{updateInterval}s</span>
-              </div>
-              <div className="flex justify-between items-center p-3 bg-gray-800/50 rounded-lg">
-                <span className="text-sm">Max Movement</span>
-                <span className="text-sm font-bold text-orange-400">{maxMovement} ATR</span>
-              </div>
+          <div className="bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Confidence Threshold</span>
+              <span className="text-white">{(confidenceThreshold * 100).toFixed(0)}%</span>
             </div>
-            <p className="text-xs text-gray-600 mt-4">
-              Settings are controlled via NinjaTrader strategy parameters
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Update Interval</span>
+              <span className="text-white">{updateInterval}s</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400 text-sm">Max ATR Movement</span>
+              <span className="text-white">{maxMovement.toFixed(1)}</span>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Performance Tab */}
+      {/* Performance Tab Content */}
       {activeTab === 'performance' && (
         <div className="space-y-4">
-          {/* Current Algorithm Performance */}
-          {algorithm !== 'none' && (
-            <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-lg p-4">
-              <h5 className="text-sm font-medium text-white mb-3">Current Algorithm: {algorithm.replace('_', ' ').toUpperCase()}</h5>
-              <p className="text-xs text-gray-400 mb-3">{currentAlgorithmPerf.description}</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center">
-                  <div className="text-xs text-gray-400">Win Rate</div>
-                  <div className="text-lg font-bold text-green-400">{currentAlgorithmPerf.winRate}%</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-gray-400">Avg Profit Factor</div>
-                  <div className="text-lg font-bold text-blue-400">{currentAlgorithmPerf.avgProfit.toFixed(1)}x</div>
-                </div>
-              </div>
+          <div className="bg-gray-800/50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Win Rate</span>
+              <span className="text-emerald-400">{currentAlgorithmPerf.winRate}%</span>
             </div>
-          )}
-
-          {/* Algorithm Comparison */}
-          <div>
-            <h5 className="text-sm font-medium text-white mb-3">Algorithm Performance</h5>
-            <div className="space-y-2">
-              {Object.entries(algorithmPerformance).map(([alg, perf]) => (
-                <div key={alg} className={`p-3 rounded-lg border transition-all ${
-                  alg === algorithm 
-                    ? 'bg-green-500/10 border-green-500/30' 
-                    : 'bg-gray-800/50 border-gray-700/50'
-                }`}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-white">
-                      {alg.replace('_', ' ').toUpperCase()}
-                      {alg === algorithm && <span className="ml-2 text-xs text-green-400">(ACTIVE)</span>}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-green-400">{perf.winRate}%</span>
-                      <span className="text-xs text-blue-400">{perf.avgProfit.toFixed(1)}x</span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500">{perf.description}</p>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-400 text-sm">Avg Profit Factor</span>
+              <span className="text-emerald-400">{currentAlgorithmPerf.avgProfit.toFixed(2)}</span>
             </div>
+            <p className="text-sm text-gray-400 mt-2">{currentAlgorithmPerf.description}</p>
           </div>
         </div>
       )}

@@ -55,28 +55,47 @@ class PositionManager extends EventEmitter {
 
     updatePosition(instrument, position) {
         const normalizedPosition = this.normalizePosition(position);
+        
+        // Add smart trailing data for manual trades
+        const smartTrailingData = {
+            current_smart_stop: position.stopLoss || 0,
+            active_trailing_algorithm: position.isManual ? 'adaptive_atr' : position.algorithm || 'none',
+            smart_trailing_active: true,
+            trailing_confidence_threshold: 0.6,
+            trailing_update_interval: 15,
+            max_stop_movement_atr: 0.5,
+            last_trailing_update: Date.now()
+        };
+
         this.positions.set(instrument, {
             ...normalizedPosition,
-            lastUpdate: new Date()
+            ...smartTrailingData,
+            lastUpdate: new Date(),
+            isManual: position.isManual || false
         });
 
         // Add to history (newest first)
         const history = this.positionHistory.get(instrument) || [];
         history.unshift({
             ...normalizedPosition,
+            ...smartTrailingData,
             timestamp: new Date()
         });
         this.positionHistory.set(instrument, history);
 
         this.logger.info(`Position updated for ${instrument}`, {
             ...normalizedPosition,
+            ...smartTrailingData,
             lastUpdate: new Date()
         });
 
-        // Emit update event
+        // Emit update event with smart trailing data
         this.emit('positionUpdate', {
             instrument,
-            position: normalizedPosition
+            position: {
+                ...normalizedPosition,
+                ...smartTrailingData
+            }
         });
 
         // Check for discrepancies with ML position
