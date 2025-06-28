@@ -149,49 +149,39 @@ class MLEngine {
     const startTime = Date.now();
     
     try {
-      // Validate input data (from your existing validatePredictionRequest)
+      // Log prediction request
+      logger.info('🔄 Generating prediction:', {
+        instrument: marketData.instrument,
+        timestamp: new Date().toISOString()
+      });
+
+      // Validate input data
       const validatedData = this.validateAndSanitizeInput(marketData);
       
-      // Extract features (from your existing feature extraction)
+      // Extract features
       const features = await this.featureEngineer.extractFeatures(validatedData);
       
-      // Generate predictions from all models (from your existing ensemble)
+      // Generate predictions from all models
       const predictions = await this.generateEnsemblePrediction(features, validatedData);
       
-      // Apply prediction stabilization (from your existing stabilization logic)
-      const stabilizedPrediction = this.stabilizePrediction(predictions);
+      // Track model metrics
+      this.trackModelMetrics(predictions);
+
+      // Log prediction results
+      logger.info('✨ Model predictions generated:', {
+        instrument: marketData.instrument,
+        lstm: predictions.lstm?.confidence || 0,
+        transformer: predictions.transformer?.confidence || 0,
+        randomForest: predictions.randomForest?.confidence || 0,
+        ensemble: predictions.ensemble?.confidence || 0,
+        latency: Date.now() - startTime
+      });
       
-      // Add metadata and performance metrics
-      const finalPrediction = {
-        ...stabilizedPrediction,
-        timestamp: new Date().toISOString(),
-        processingTime: Date.now() - startTime,
-        instrument: validatedData.instrument,
-        modelVersions: this.getModelVersions(),
-        features: {
-          count: features.length,
-          quality: this.assessFeatureQuality(features)
-        },
-        aiReasoning: this.generateAIReasoning(stabilizedPrediction, validatedData)
-      };
-      
-      // Cache prediction
-      const cacheKey = `${validatedData.instrument}_${Date.now()}`;
-      this.predictionCache.set(cacheKey, finalPrediction);
-      
-      // Update prediction history for stabilization
-      this.updatePredictionHistory(finalPrediction);
-      
-      logger.logMLPrediction(
-        finalPrediction.direction, 
-        finalPrediction.confidence
-      );
-      
-      return finalPrediction;
+      return predictions;
       
     } catch (error) {
-      logger.error('❌ ML prediction generation failed:', error);
-      return this.generateFallbackPrediction(marketData);
+      logger.error('❌ Prediction generation error:', error);
+      return null;
     }
   }
 
@@ -642,12 +632,37 @@ class MLEngine {
   }
 
   get stats() {
-    return {
-      predictionsGenerated: this.mlPredictionHistory.length,
-      cacheSize: this.predictionCache.size,
-      lastPrediction: this.lastMLPrediction?.timestamp,
-      modelsLoaded: this.modelManager ? this.modelManager.models.size : 0
+    return this._modelStats || {
+      lstm: { predictions: 0, accuracy: 0 },
+      transformer: { predictions: 0, accuracy: 0 },
+      randomForest: { predictions: 0, accuracy: 0 },
+      ensemble: { predictions: 0, accuracy: 0 }
     };
+  }
+
+  // Track model metrics
+  trackModelMetrics(predictions) {
+    if (!this._modelStats) {
+      this._modelStats = {
+        lstm: { predictions: 0, accuracy: 0 },
+        transformer: { predictions: 0, accuracy: 0 },
+        randomForest: { predictions: 0, accuracy: 0 },
+        ensemble: { predictions: 0, accuracy: 0 }
+      };
+    }
+
+    // Update prediction counts
+    Object.keys(predictions).forEach(model => {
+      if (this._modelStats[model]) {
+        this._modelStats[model].predictions++;
+        // Accuracy will be updated when we get trade results
+        if (predictions[model].confidence) {
+          this._modelStats[model].accuracy = 
+            (this._modelStats[model].accuracy * (this._modelStats[model].predictions - 1) + 
+             predictions[model].confidence) / this._modelStats[model].predictions;
+        }
+      }
+    });
   }
 }
 

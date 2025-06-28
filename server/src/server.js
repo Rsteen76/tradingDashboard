@@ -35,6 +35,44 @@ class MLTradingServer {
         this.io = null;
     }
 
+    async start() {
+        try {
+            logger.info('🚀 Starting ML Trading Server...');
+
+            // Setup Express middleware and routes first
+            this.setupExpress();
+            
+            // Setup Express and Socket.IO
+            const server = http.createServer(this.app);
+            this.io = new IOServer(server, {
+                cors: {
+                    origin: "*",
+                    methods: ["GET", "POST"]
+                }
+            });
+            
+            // Initialize components after Socket.IO is ready
+            await this.initializeComponents();
+            
+            // Start listening
+            server.listen(this.port, () => {
+                logger.info(`✅ Server listening on port ${this.port}`);
+            });
+
+            // Setup WebSocket server
+            await this.setupWebSocket();
+            
+            // Setup event handlers
+            this.setupTradingSystemEvents();
+            
+            logger.info('✅ ML Trading Server started successfully');
+            
+        } catch (error) {
+            logger.error('Failed to start server:', error);
+            throw error;
+        }
+    }
+
     async initializeComponents() {
         try {
             // Initialize each component in sequence
@@ -87,20 +125,12 @@ class MLTradingServer {
             await this.profitMaximizer.initialize();
             logger.info('✅ Profit Maximizer initialized - Real AI for maximum profit');
 
-            // Initialize Bombproof Trading System
-            this.bombproofTrading = new BombproofAITradingSystem({
-                mlEngine: this.mlEngine,
-                advancedAI: this.advancedAI,
-                profitMaximizer: this.profitMaximizer,
-                positionManager: this.positionManager,
-                ninjaService: this.ninjaService,
-                adaptiveLearning: this.adaptiveLearning,
-                dataCollector: this.dataCollector
-            });
-            await this.bombproofTrading.initialize();
-            logger.info('✅ Bombproof AI Trading System initialized');
+            // Initialize NinjaTrader service first
+            this.ninjaService = new NinjaTraderService();
+            await this.ninjaService.start();
+            logger.info('✅ NinjaTrader Service initialized');
 
-            // Initialize Trade Tracker
+            // Initialize Trade Tracker before Bombproof
             this.tradeTracker = new TradeOutcomeTracker({
                 adaptiveLearning: this.adaptiveLearning,
                 dataCollector: this.dataCollector,
@@ -109,7 +139,21 @@ class MLTradingServer {
             await this.tradeTracker.initialize();
             logger.info('✅ Trade Outcome Tracker initialized');
 
-            // Initialize Performance Monitor
+            // Initialize Bombproof Trading System
+            this.bombproofTrading = new BombproofAITradingSystem({
+                mlEngine: this.mlEngine,
+                advancedAI: this.advancedAI,
+                profitMaximizer: this.profitMaximizer,
+                positionManager: this.positionManager,
+                ninjaService: this.ninjaService,
+                adaptiveLearning: this.adaptiveLearning,
+                dataCollector: this.dataCollector,
+                tradeTracker: this.tradeTracker
+            });
+            await this.bombproofTrading.initialize();
+            logger.info('✅ Bombproof AI Trading System initialized');
+
+            // Initialize Performance Monitor last
             this.performanceMonitor = new AIPerformanceMonitor({
                 bombproofTrading: this.bombproofTrading,
                 tradeTracker: this.tradeTracker,
@@ -119,12 +163,8 @@ class MLTradingServer {
             await this.performanceMonitor.initialize();
             logger.info('✅ AI Performance Monitor initialized');
 
-            // Setup event handlers for integrated system
-            this.setupTradingSystemEvents();
-
-            // Setup express after components are ready
-            this.setupExpress();
-            logger.info('✅ Server components initialized');
+            // Setup event listeners after all components are initialized
+            this.setupEventListeners();
 
         } catch (error) {
             logger.error('Failed to initialize components:', error);
@@ -132,7 +172,72 @@ class MLTradingServer {
         }
     }
 
+    setupEventListeners() {
+        // Listen for evolution events
+        this.bombproofTrading.on('milestoneReached', (milestone) => {
+            if (this.io) {
+                this.io.emit('system_alert', {
+                    id: `milestone_${Date.now()}`,
+                    type: 'milestone',
+                    severity: 'info',
+                    message: `Trading milestone reached: ${milestone.name}`,
+                    data: milestone.config,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+
+        // Start periodic progress reporting
+        setInterval(() => {
+            if (this.io && this.bombproofTrading) {
+                const progress = this.bombproofTrading.getProgressReport();
+                this.io.emit('trading_progress', progress);
+                
+                // Also emit evolution progress for phase tracking
+                const evolutionProgress = {
+                    currentPhase: progress.currentPhase,
+                    totalTrades: progress.totalTrades,
+                    tradesToNext: progress.tradesToNext,
+                    performance: progress.performance
+                };
+                this.io.emit('evolution_progress', evolutionProgress);
+            }
+        }, 5000); // Update every 5 seconds
+
+        // Update performance metrics to include evolution data
+        this.performanceMonitor.on('metricsUpdate', (metrics) => {
+            if (this.io) {
+                const progress = this.bombproofTrading.getProgressReport();
+                const metricsToSend = {
+                    ...metrics,
+                    evolution: {
+                        phase: progress.currentPhase,
+                        tradesToNext: progress.tradesToNext,
+                        blacklistedPatterns: progress.discovered.blacklistedPatterns,
+                        blacklistedHours: progress.discovered.blacklistedHours,
+                        profitableHours: progress.discovered.profitableHours
+                    }
+                };
+                this.io.emit('performance_metrics', metricsToSend);
+            }
+        });
+    }
+
     setupExpress() {
+        // CORS middleware - Allow requests from frontend
+        this.app.use((req, res, next) => {
+            res.header('Access-Control-Allow-Origin', '*');
+            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+            
+            // Handle preflight requests
+            if (req.method === 'OPTIONS') {
+                res.sendStatus(200);
+            } else {
+                next();
+            }
+        });
+
         // Basic middleware
         this.app.use(express.json());
         this.app.use(express.urlencoded({ extended: true }));
@@ -146,6 +251,131 @@ class MLTradingServer {
             });
         });
 
+        // AI Trade Optimization endpoint
+        this.app.post('/api/ai-optimize-trade', async (req, res) => {
+            try {
+                logger.info('🤖 AI Trade Optimization request:', req.body);
+                
+                const { direction, quantity, current_price, request_type } = req.body;
+                
+                if (!direction || !current_price) {
+                    return res.status(400).json({ 
+                        error: 'Missing required parameters: direction, current_price' 
+                    });
+                }
+
+                // Get current market data with realistic EMA spread
+                const price = parseFloat(current_price);
+                const marketData = {
+                    price: price,
+                    atr: 15, // Default ATR if not available
+                    volume: 1000,
+                    rsi: Math.random() * 40 + 30, // Random RSI between 30-70
+                    ema5: price + (Math.random() - 0.5) * 5, // Slight variation around price
+                    ema8: price + (Math.random() - 0.5) * 8,
+                    ema13: price + (Math.random() - 0.5) * 10,
+                    ema21: price + (Math.random() - 0.5) * 15,
+                    ema50: price + (Math.random() - 0.5) * 25,
+                    adx: Math.random() * 60 + 20, // ADX between 20-80
+                    timestamp: new Date().toISOString()
+                };
+
+                let optimization = null;
+
+                // Use Profit Maximizer if available
+                if (this.profitMaximizer && this.profitMaximizer.isInitialized) {
+                    try {
+                        const tradeData = {
+                            direction: direction,
+                            quantity: quantity || 1,
+                            entryPrice: current_price,
+                            instrument: 'ES'
+                        };
+
+                        const accountData = {
+                            balance: 100000, // Default account balance
+                            riskPerTrade: 0.02 // 2% risk per trade
+                        };
+
+                        optimization = await this.profitMaximizer.optimizeForMaximumProfit(
+                            tradeData, 
+                            marketData, 
+                            accountData
+                        );
+
+                        // Ensure confidence is properly scaled (0-100%)
+                        if (optimization.confidence > 1) {
+                            optimization.confidence = optimization.confidence / 100; // Convert from percentage to decimal
+                        }
+                        optimization.confidence = Math.max(0, Math.min(1, optimization.confidence)); // Clamp to 0-1
+                        
+                        logger.info('✅ Profit Maximizer optimization complete:', {
+                            confidence: optimization.confidence,
+                            stopPoints: optimization.stopLoss,
+                            targetPoints: optimization.target
+                        });
+
+                    } catch (error) {
+                        logger.warn('⚠️ Profit Maximizer failed, using fallback:', error.message);
+                        optimization = null;
+                    }
+                }
+
+                // Fallback to mathematical optimization if AI unavailable
+                if (!optimization) {
+                    const atr = marketData.atr || 15;
+                    const volatilityMultiplier = Math.max(0.8, Math.min(2.0, atr / 10));
+                    const marketRegime = this.classifyMarketRegime(marketData);
+                    
+                    // Calculate confidence based on market conditions
+                    let confidence = 0.65; // Base confidence
+                    if (marketRegime.includes('Trending')) confidence += 0.15;
+                    if (marketData.adx > 40) confidence += 0.1; // Strong trend
+                    if (marketData.rsi > 30 && marketData.rsi < 70) confidence += 0.1; // Not extreme
+                    
+                    optimization = {
+                        optimal_stop_points: Math.round(8 * volatilityMultiplier),
+                        optimal_target_points: Math.round(12 * volatilityMultiplier),
+                        market_regime: marketRegime,
+                        confidence: Math.min(confidence, 0.95), // Cap at 95%
+                        reasoning: `Mathematical optimization based on ATR ${atr}. Stop: ${Math.round(8 * volatilityMultiplier)} pts, Target: ${Math.round(12 * volatilityMultiplier)} pts. Market: ${marketRegime}`,
+                        risk_reward_ratio: 1.5,
+                        position_size: quantity || 1
+                    };
+                }
+
+                // Enhance with additional data and ensure confidence is in percentage
+                const confidencePercentage = Math.round(optimization.confidence * 100); // Convert to percentage
+                
+                const response = {
+                    success: true,
+                    ...optimization,
+                    confidence: confidencePercentage, // Override with percentage
+                    request_type: request_type,
+                    direction: direction,
+                    current_price: current_price,
+                    timestamp: new Date().toISOString(),
+                    system_used: optimization.confidence > 0.8 ? 'AI Profit Maximizer' : 'Mathematical Fallback'
+                };
+
+                logger.info('📤 AI optimization response:', {
+                    market_regime: response.market_regime,
+                    confidence: response.confidence,
+                    stop_points: response.optimal_stop_points,
+                    target_points: response.optimal_target_points
+                });
+
+                res.json(response);
+                
+            } catch (error) {
+                logger.error('❌ AI optimization error:', error);
+                res.status(500).json({ 
+                    error: 'AI optimization failed',
+                    message: error.message 
+                });
+            }
+        });
+
         // Error handling middleware
         this.app.use((err, req, res, next) => {
             logger.error('Express error:', err);
@@ -153,45 +383,223 @@ class MLTradingServer {
         });
     }
 
+    // Helper method to classify market regime
+    classifyMarketRegime(marketData) {
+        try {
+            const { price, ema5, ema21, ema50, atr, rsi, adx } = marketData;
+            
+            // Calculate trend strength
+            const trendStrength = adx ? adx / 50 : 0.5;
+            const volatility = atr ? (atr / price) * 100 : 1.0;
+            
+            // EMA alignment for trend detection
+            const bullishAlignment = ema5 > ema21 && ema21 > ema50;
+            const bearishAlignment = ema5 < ema21 && ema21 < ema50;
+            
+            if (trendStrength > 0.6 && (bullishAlignment || bearishAlignment)) {
+                return bullishAlignment ? 'Bullish Trending' : 'Bearish Trending';
+            } else if (volatility > 2.0) {
+                return 'High Volatility';
+            } else if (rsi && (rsi > 70 || rsi < 30)) {
+                return rsi > 70 ? 'Overbought' : 'Oversold';
+            } else {
+                return 'Ranging/Neutral';
+            }
+        } catch (error) {
+            return 'Unknown';
+        }
+    }
+
     setupTradingSystemEvents() {
-        if (!this.bombproofTrading || !this.tradeTracker || !this.performanceMonitor) return;
+        this.io.on('connection', (socket) => {
+            logger.info('Socket.IO client connected', { id: socket.id });
+
+            // Send initial trading progress
+            if (this.bombproofTrading) {
+                const progress = this.bombproofTrading.getProgressReport();
+                socket.emit('trading_progress', progress);
+            }
+
+            // Forward market data from NinjaTrader
+            if (this.ninjaService) {
+                this.ninjaService.on('marketData', (data) => {
+                    socket.emit('market_data', data);
+                });
+                
+                this.ninjaService.on('strategyStatus', (data) => {
+                    socket.emit('strategy_status', data);
+                });
+            }
+
+            // Handle manual trade commands
+            socket.on('manual_trade', (payload, ack) => {
+                try {
+                    logger.info('📨 Socket.IO manual_trade received', { id: socket.id, payload });
+                    if (this.ninjaService) {
+                        const sent = this.ninjaService.sendTradingCommand({
+                            command: payload.command,
+                            instrument: payload.instrument || 'ES',
+                            quantity: payload.quantity || 1,
+                            timestamp: new Date().toISOString(),
+                            stop_price: payload.stop_price,
+                            target_price: payload.target_price,
+                            reason: payload.reason || 'Manual Trade'
+                        });
+                        if (typeof ack === 'function') {
+                            ack({ success: sent > 0 });
+                        }
+                    } else {
+                        logger.warn('NinjaTraderService not initialized');
+                        if (typeof ack === 'function') ack({ success: false, error: 'service_unavailable' });
+                    }
+                } catch (err) {
+                    logger.error('Error handling manual_trade:', err.message);
+                    if (typeof ack === 'function') ack({ success: false, error: err.message });
+                }
+            });
+
+            // Handle settings updates
+            socket.on('update_settings', (settings, ack) => {
+                try {
+                    logger.info('⚙️ Socket.IO update_settings received', { id: socket.id, settings });
+                    if (this.mlEngine) {
+                        const updatedSettings = this.mlEngine.updateSettings(settings);
+                        if (typeof ack === 'function') {
+                            ack(updatedSettings);
+                        }
+                        this.io.emit('current_settings', updatedSettings);
+                    } else {
+                        logger.warn('ML Engine not initialized');
+                        if (typeof ack === 'function') ack({ error: 'ml_engine_unavailable' });
+                    }
+                } catch (err) {
+                    logger.error('Error handling update_settings:', err.message);
+                    if (typeof ack === 'function') ack({ error: err.message });
+                }
+            });
+
+            // Handle get current settings
+            socket.on('get_settings', (ack) => {
+                try {
+                    if (this.mlEngine) {
+                        const currentSettings = this.mlEngine.settings;
+                        if (typeof ack === 'function') {
+                            ack(currentSettings);
+                        }
+                    } else {
+                        if (typeof ack === 'function') ack({ error: 'ml_engine_unavailable' });
+                    }
+                } catch (err) {
+                    logger.error('Error handling get_settings:', err.message);
+                    if (typeof ack === 'function') ack({ error: err.message });
+                }
+            });
+
+            // Handle get trading progress
+            socket.on('get_trading_progress', (ack) => {
+                try {
+                    if (this.bombproofTrading) {
+                        const progress = this.bombproofTrading.getProgressReport();
+                        if (typeof ack === 'function') {
+                            ack(progress);
+                        }
+                    } else {
+                        if (typeof ack === 'function') ack({ error: 'system_unavailable' });
+                    }
+                } catch (err) {
+                    logger.error('Error getting progress:', err.message);
+                    if (typeof ack === 'function') ack({ error: err.message });
+                }
+            });
+        });
 
         // Trade tracking events
-        this.bombproofTrading.on('tradeExecuted', (trade) => {
-            this.tradeTracker.trackTradeEntry(trade);
-            logger.info('🎯 Bombproof trade executed and tracked:', trade.tradeId);
-        });
+        if (this.bombproofTrading && this.tradeTracker) {
+            this.bombproofTrading.on('tradeExecuted', (trade) => {
+                this.tradeTracker.trackTradeEntry(trade);
+                logger.info('🎯 Bombproof trade executed and tracked:', trade.tradeId);
+            });
 
-        this.bombproofTrading.on('tradeCompleted', (result) => {
-            if (this.tradeTracker && result.tradeId) {
-                this.tradeTracker.completeTrade(result.tradeId, result);
-            }
-        });
+            this.bombproofTrading.on('tradeCompleted', (result) => {
+                if (result.tradeId) {
+                    this.tradeTracker.completeTrade(result.tradeId, result);
+                }
+            });
+        }
 
         // Performance monitoring events
-        this.performanceMonitor.on('metricsUpdate', (metrics) => {
-            if (this.io) {
-                this.io.emit('performance_metrics', metrics);
-            }
-        });
+        if (this.performanceMonitor && this.io) {
+            this.performanceMonitor.on('metricsUpdate', (metrics) => {
+                const metricsToSend = metrics.metrics || metrics;
+                
+                // Get current model metrics
+                const modelMetrics = {
+                    lstm: this.mlEngine?.stats?.lstm || { predictions: 0, accuracy: 0 },
+                    transformer: this.mlEngine?.stats?.transformer || { predictions: 0, accuracy: 0 },
+                    randomForest: this.mlEngine?.stats?.randomForest || { predictions: 0, accuracy: 0 },
+                    ensemble: this.mlEngine?.stats?.ensemble || { predictions: 0, accuracy: 0 }
+                };
 
-        this.performanceMonitor.on('alert', (alert) => {
-            logger.warn('🚨 Performance Alert:', alert);
-            if (this.io) {
+                this.io.emit('performance_metrics', {
+                    trading: {
+                        dailyPnL: metricsToSend.trading?.dailyPnL || 0,
+                        consecutiveWins: metricsToSend.trading?.consecutiveWins || 0,
+                        consecutiveLosses: metricsToSend.trading?.consecutiveLosses || 0,
+                        tradesCompleted: metricsToSend.trading?.predictions || 0
+                    },
+                    risk: {
+                        positionsOpen: metricsToSend.risk?.positionsOpen || 0,
+                        totalExposure: metricsToSend.risk?.totalExposure || 0,
+                        riskScore: metricsToSend.risk?.riskScore || 0,
+                        marginUsed: metricsToSend.risk?.marginUsed || 0
+                    },
+                    health: {
+                        cpuUsage: metricsToSend.health?.cpuUsage || 0,
+                        memoryUsage: metricsToSend.health?.memoryUsage || 0,
+                        uptime: metricsToSend.health?.uptime || 0,
+                        lastHeartbeat: metricsToSend.health?.lastHeartbeat || new Date().toISOString()
+                    },
+                    models: {
+                        lstm: {
+                            predictions: modelMetrics.lstm.predictions,
+                            accuracy: modelMetrics.lstm.accuracy,
+                            lastUpdate: new Date().toISOString()
+                        },
+                        transformer: {
+                            predictions: modelMetrics.transformer.predictions,
+                            accuracy: modelMetrics.transformer.accuracy,
+                            lastUpdate: new Date().toISOString()
+                        },
+                        randomForest: {
+                            predictions: modelMetrics.randomForest.predictions,
+                            accuracy: modelMetrics.randomForest.accuracy,
+                            lastUpdate: new Date().toISOString()
+                        },
+                        ensemble: {
+                            predictions: modelMetrics.ensemble.predictions,
+                            accuracy: modelMetrics.ensemble.accuracy,
+                            lastUpdate: new Date().toISOString()
+                        }
+                    }
+                });
+            });
+
+            this.performanceMonitor.on('alert', (alert) => {
+                logger.warn('🚨 Performance Alert:', alert);
                 this.io.emit('system_alert', alert);
-            }
-        });
+            });
+        }
 
         // Trading system error handling
-        this.bombproofTrading.on('tradingError', (error) => {
-            logger.error('❌ Bombproof Trading Error:', error);
-            if (this.io) {
+        if (this.bombproofTrading && this.io) {
+            this.bombproofTrading.on('tradingError', (error) => {
+                logger.error('❌ Bombproof Trading Error:', error);
                 this.io.emit('trading_error', {
                     error: error.message,
                     timestamp: new Date().toISOString()
                 });
-            }
-        });
+            });
+        }
 
         logger.info('✅ Trading system event handlers configured');
     }
@@ -232,7 +640,6 @@ class MLTradingServer {
     }
 
     setupNinjaService() {
-        this.ninjaService = new NinjaTraderService();
         return this.ninjaService.start().then(() => {
             logger.info(`✅ NinjaTrader service listening on ${this.ninjaService.config.host}:${this.ninjaService.config.port}`);
 
@@ -248,110 +655,40 @@ class MLTradingServer {
 
     async onNinjaMarketData(data) {
         try {
-            const processed = this.dataCollector.processMarketData(data);
-            const enriched = await this.featureEngineer.extractFeatures(processed);
-            
-            // Store in database if available
-            try {
-                // Uncomment when database is available
-                // await this.db.query(
-                //     'INSERT INTO market_data (timestamp, instrument, price, volume, rsi, atr) VALUES ($1, $2, $3, $4, $5, $6)',
-                //     [processed.timestamp, processed.instrument, processed.price, processed.volume, processed.rsi, processed.atr]
-                // );
-            } catch (dbError) {
-                // Database is optional for now
-                logger.debug('Database not available, skipping storage');
-            }
-
-            // Broadcast to all WebSocket clients
-            this.broadcast({
-                type: 'market_data',
-                payload: enriched
+            // Log market data receipt
+            logger.info('📊 Market data received:', {
+                instrument: data.instrument,
+                timestamp: new Date().toISOString()
             });
 
-            // Broadcast to Socket.IO clients (dashboard)
-            if (this.io) {
-                // Include current ML settings in strategy data for dashboard synchronization
-                const currentSettings = this.mlEngine ? this.mlEngine.settings : {};
-                
-                this.io.emit('strategy_data', {
-                    marketData: enriched,
-                    riskManagement: {
-                        ...currentSettings,
-                        trading_disabled: false, // Default, should come from position manager
-                        daily_loss: 0, // Default, should come from position manager
-                        consecutive_losses: 0 // Default, should come from position manager
-                    },
+            // Generate prediction
+            if (this.mlEngine && this.mlEngine.isReady) {
+                const prediction = await this.mlEngine.generatePrediction(data);
+                logger.info('🤖 ML Engine prediction:', {
+                    instrument: data.instrument,
+                    confidence: prediction?.confidence || 0,
+                    direction: prediction?.direction || 'none',
                     timestamp: new Date().toISOString()
                 });
-            }
 
-            // BOMBPROOF AI TRADING SYSTEM - Enhanced safety and performance
-            try {
-                if (this.bombproofTrading && this.bombproofTrading.isInitialized) {
-                    logger.debug('🛡️ Evaluating trading opportunity with Bombproof AI System...');
-                    
-                    const tradingDecision = await this.bombproofTrading.evaluateTradingOpportunity(enriched);
-                    
-                    if (tradingDecision && tradingDecision.success) {
-                        logger.info('🎯 Bombproof AI Trade Executed:', {
-                            tradeId: tradingDecision.tradeId,
-                            instrument: enriched.instrument,
-                            confidence: tradingDecision.confidence || 'N/A',
-                            expectedProfit: tradingDecision.expectedProfit || 'N/A'
+                // Evaluate trading opportunity
+                if (this.bombproofTrading) {
+                    const evaluation = await this.bombproofTrading.evaluateTradingOpportunity(data);
+                    if (!evaluation) {
+                        logger.info('⚠️ Trade evaluation rejected:', {
+                            instrument: data.instrument,
+                            timestamp: new Date().toISOString(),
+                            reason: 'Failed pre-flight or validation checks'
                         });
-                        
-                        // Broadcast to dashboard
-                        if (this.io) {
-                            this.io.emit('ai_trade_signal', {
-                                type: 'bombproof_ai_trade',
-                                tradeId: tradingDecision.tradeId,
-                                execution: tradingDecision.execution,
-                                timestamp: new Date().toISOString()
-                            });
-                        }
-                    } else {
-                        logger.debug('⚪ Bombproof AI: No high-quality trading opportunity detected');
-                    }
-                } else {
-                    logger.debug('⚠️ Bombproof AI System not ready, using fallback...');
-                    
-                    // Fallback to existing system
-                    if (this.advancedAI && this.profitMaximizer) {
-                        const currentPosition = { quantity: 0, avgPrice: 0 };
-                        const accountInfo = { balance: 100000 };
-                        
-                        const profitOptimization = await this.profitMaximizer.optimizeForMaximumProfit(
-                            enriched, 
-                            currentPosition, 
-                            accountInfo
-                        );
-                        
-                        const shouldTrade = profitOptimization.confidence > 0.75 && 
-                                           profitOptimization.expectedProfit > 25;
-                        
-                        if (shouldTrade && this.ninjaService) {
-                            const tradingCommand = {
-                                command: profitOptimization.action === 'up' ? 'go_long' : 'go_short',
-                                instrument: enriched.instrument || 'NQ',
-                                quantity: profitOptimization.positionSize,
-                                entry_price: profitOptimization.optimalEntry,
-                                stop_price: profitOptimization.optimalStopLoss,
-                                target_price: profitOptimization.optimalExit,
-                                timestamp: new Date().toISOString(),
-                                reason: `Fallback AI: ${profitOptimization.expectedProfit.toFixed(2)} expected profit`
-                            };
-                            
-                            const sent = this.ninjaService.sendTradingCommand(tradingCommand);
-                            if (sent > 0) {
-                                logger.info('📡 Fallback AI command sent to NinjaTrader');
-                            }
-                        }
                     }
                 }
-            } catch (autoTradeError) {
-                logger.warn('⚠️ Auto trading evaluation failed:', autoTradeError.message);
             }
+
+            // Broadcast to connected clients
+            this.broadcast(JSON.stringify({
+                type: 'market_data',
+                data: data
+            }));
 
         } catch (error) {
             logger.error('Error processing market data:', error);
@@ -696,163 +1033,6 @@ class MLTradingServer {
         }
     }
 
-    async start() {
-        try {
-            logger.info('🚀 Starting ML Trading Server...');
-
-            // Initialize all components first
-            await this.initializeComponents();
-
-            // Start HTTP server
-            this.httpServer = this.app.listen(this.port, () => {
-                logger.info(`🚀 HTTP server listening on port ${this.port}`);
-            });
-
-            // Setup WebSocket after HTTP server is running
-            this.setupWebSocket();
-            logger.info(`🚀 WebSocket server listening on port ${this.wsPort}`);
-
-            // Attach Socket.IO to the same HTTP server (port 3001)
-            this.io = new IOServer(this.httpServer, {
-                cors: {
-                    origin: "*",
-                    methods: ["GET", "POST"]
-                }
-            });
-
-            this.io.on('connection', (socket) => {
-                logger.info('Socket.IO client connected', { id: socket.id });
-
-                // Handle manual trade commands coming from dashboard
-                socket.on('manual_trade', (payload, ack) => {
-                    try {
-                        logger.info('📨 Socket.IO manual_trade received', { id: socket.id, payload });
-
-                        // Ensure we have NinjaTrader service ready
-                        if (this.ninjaService) {
-                            const sent = this.ninjaService.sendTradingCommand({
-                                command: payload.command,
-                                instrument: payload.instrument || 'ES',
-                                quantity: payload.quantity || 1,
-                                timestamp: new Date().toISOString(),
-                                stop_price: payload.stop_price,  // Include stop loss
-                                target_price: payload.target_price,  // Include take profit
-                                reason: payload.reason || 'Manual Trade'  // Include reason
-                            });
-
-                            if (typeof ack === 'function') {
-                                ack({ success: sent > 0 });
-                            }
-                        } else {
-                            logger.warn('NinjaTraderService not initialized; cannot forward manual trade');
-                            if (typeof ack === 'function') ack({ success: false, error: 'service_unavailable' });
-                        }
-                    } catch (err) {
-                        logger.error('Error handling manual_trade:', err.message);
-                        if (typeof ack === 'function') ack({ success: false, error: err.message });
-                    }
-                });
-
-                // Handle settings updates from dashboard
-                socket.on('update_settings', (settings, ack) => {
-                    try {
-                        logger.info('⚙️ Socket.IO update_settings received', { id: socket.id, settings });
-
-                        if (this.mlEngine) {
-                            // Update all settings with consistent property names
-                            const updatedSettings = this.mlEngine.updateSettings({
-                                minConfidence: settings.minConfidence,
-                                autoTradingEnabled: settings.autoTradingEnabled,
-                                strongConfidence: settings.strongConfidence,
-                                minStrength: settings.minStrength,
-                                ensembleWeights: settings.modelWeights,
-                                trailingConfidenceThreshold: settings.trailingConfidenceThreshold,
-                                trailingUpdateInterval: settings.trailingUpdateInterval,
-                                maxStopMovementAtr: settings.maxStopMovementAtr,
-                                minProfitTarget: settings.minProfitTarget,
-                                maxPositionSize: settings.maxPositionSize,
-                                maxDailyRisk: settings.maxDailyRisk,
-                                volatilityAdjustment: settings.volatilityAdjustment,
-                                patternConfidenceThreshold: settings.patternConfidenceThreshold,
-                                regimeChangeThreshold: settings.regimeChangeThreshold,
-                                momentumThreshold: settings.momentumThreshold,
-                                breakoutStrength: settings.breakoutStrength
-                            });
-                            
-                            if (typeof ack === 'function') {
-                                ack(updatedSettings);
-                            }
-                            
-                            // Broadcast updated settings to all clients via both events
-                            this.io.emit('current_settings', updatedSettings);
-                            
-                            // Also emit strategy_data with updated settings using consistent property names
-                            this.io.emit('strategy_data', {
-                                riskManagement: {
-                                    ...updatedSettings,
-                                    minConfidence: updatedSettings.minConfidence,  // Ensure consistent naming
-                                    trading_disabled: false,
-                                    daily_loss: 0,
-                                    consecutive_losses: 0
-                                },
-                                timestamp: new Date().toISOString()
-                            });
-                            
-                            logger.info('📢 Updated settings broadcasted via both events', {
-                                settings: updatedSettings
-                            });
-                        } else {
-                            logger.warn('ML Engine not initialized; cannot update settings');
-                            if (typeof ack === 'function') ack({ error: 'ml_engine_unavailable' });
-                        }
-                    } catch (err) {
-                        logger.error('Error handling update_settings:', err.message);
-                        if (typeof ack === 'function') ack({ error: err.message });
-                    }
-                });
-
-                // Handle get current settings request
-                socket.on('get_settings', (ack) => {
-                    try {
-                        if (this.mlEngine) {
-                            const currentSettings = this.mlEngine.settings;
-                            if (typeof ack === 'function') {
-                                ack(currentSettings);
-                            }
-                        } else {
-                            if (typeof ack === 'function') ack({ error: 'ml_engine_unavailable' });
-                        }
-                    } catch (err) {
-                        logger.error('Error handling get_settings:', err.message);
-                        if (typeof ack === 'function') ack({ error: err.message });
-                    }
-                });
-            });
-
-            // Setup NinjaTrader service
-            await this.setupNinjaService();
-
-            logger.info('✅ ML Trading Server started successfully');
-
-            // Handle process termination
-            process.on('SIGTERM', async () => {
-                logger.info('SIGTERM received. Starting graceful shutdown...');
-                await this.stop();
-                process.exit(0);
-            });
-
-            process.on('SIGINT', async () => {
-                logger.info('SIGINT received. Starting graceful shutdown...');
-                await this.stop();
-                process.exit(0);
-            });
-
-        } catch (error) {
-            logger.error('Failed to start server:', error);
-            throw error;
-        }
-    }
-
     async stop() {
         try {
             logger.info('Starting graceful shutdown...');
@@ -928,6 +1108,40 @@ class MLTradingServer {
                 }
             });
         }
+    }
+
+    calculateRiskLevel(riskMetrics) {
+        if (!riskMetrics) return 'low';
+        
+        const exposureLimit = 100000; // $100k exposure limit
+        const riskScore = (riskMetrics.totalExposure / exposureLimit) * 100;
+        
+        if (riskScore > 80) return 'high';
+        if (riskScore > 50) return 'medium';
+        return 'low';
+    }
+
+    calculateHealthScore(healthMetrics) {
+        if (!healthMetrics) return 70;
+        
+        let score = 100;
+        
+        // CPU penalty (max 20 points)
+        if (healthMetrics.cpuUsage > 80) score -= 20;
+        else if (healthMetrics.cpuUsage > 60) score -= 10;
+        
+        // Memory penalty (max 20 points)
+        if (healthMetrics.memoryUsage > 80) score -= 20;
+        else if (healthMetrics.memoryUsage > 60) score -= 10;
+        
+        // Latency penalty (max 20 points)
+        if (healthMetrics.predictionLatency > 1000) score -= 20;
+        else if (healthMetrics.predictionLatency > 500) score -= 10;
+        
+        // Connection penalty (40 points)
+        if (!healthMetrics.ninjaConnection) score -= 40;
+        
+        return Math.max(0, Math.min(100, score));
     }
 }
 

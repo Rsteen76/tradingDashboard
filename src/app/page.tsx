@@ -6,11 +6,13 @@ import { useSocket, RiskManagement, StrategyStatus, MarketData } from '@/hooks/u
 import SettingsPanel, { Settings } from '@/components/SettingsPanel'
 import Toast from '@/components/Toast'
 import TradeDecisionPanel from '@/components/TradeDecisionPanel'
+import { AIPerformanceMonitor } from '@/components/AIPerformanceMonitor'
+import ManualTradePanel from '@/components/ManualTradePanel'
 
 
 
 const TradingDashboard = () => {
-  const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, updateServerSettings, getCurrentSettings, sendManualTrade } = useSocket()
+  const { strategyData, marketDataHistory, tradeHistory, mlPrediction, connectionState, performanceMetrics, systemAlerts, evolutionProgress, updateServerSettings, getCurrentSettings, sendManualTrade } = useSocket()
   const [selectedTimeframe, setSelectedTimeframe] = useState('1m')
   const [showSettings, setShowSettings] = useState(false)
   const [tradeToast, setTradeToast] = useState<string | null>(null)
@@ -884,31 +886,20 @@ const TradingDashboard = () => {
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="p-6 rounded-2xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/30 h-[200px] flex flex-col">
-              <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
-              <div className="flex-1 flex flex-col space-y-3">
-                <button 
-                  onClick={() => executeTrade({ command: 'go_long', quantity: 1 })}
-                  className="flex-1 p-3 bg-emerald-500 hover:bg-emerald-600 rounded-lg font-medium transition-colors"
-                >
-                  Execute Long
-                </button>
-                <button 
-                  onClick={() => executeTrade({ command: 'go_short', quantity: 1 })}
-                  className="flex-1 p-3 bg-red-500 hover:bg-red-600 rounded-lg font-medium transition-colors"
-                >
-                  Execute Short
-                </button>
-                <button 
-                  onClick={() => executeTrade({ command: 'close_position' })}
-                  className="flex-1 p-3 bg-slate-600 hover:bg-slate-700 rounded-lg font-medium transition-colors"
-                >
-                  Close Position
-                </button>
-              </div>
+            {/* Manual Trade Panel */}
+            <div className="rounded-2xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/30">
+              <ManualTradePanel onSend={sendManualTrade} />
             </div>
           </div>
+        </div>
+
+        {/* AI Performance Monitor */}
+        <div className="mt-6">
+          <AIPerformanceMonitor 
+            performanceMetrics={performanceMetrics}
+            systemAlerts={systemAlerts}
+            evolutionProgress={evolutionProgress}
+          />
         </div>
 
         {/* Bottom Status Bar */}

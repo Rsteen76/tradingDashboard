@@ -403,6 +403,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				if (Position.MarketPosition == MarketPosition.Long)
 				{
 					Print("📊 ML Long command ignored: Already in long position");
+					SendMLCommandConfirmation("go_long", false, "Already in long position");
 					return;
 				}
 				
@@ -411,47 +412,58 @@ namespace NinjaTrader.NinjaScript.Strategies
 				double entryPrice = ParseDouble(command, "entry_price", Close[0]);
 				double stopPrice = ParseDouble(command, "stop_price", 0);
 				double targetPrice = ParseDouble(command, "target_price", 0);
-				string reason = ParseString(command, "reason", "ML Signal");
+				string reason = ParseString(command, "reason", "Manual Trade");
 				
-				Print($"📈 EXECUTING ML Long Command: {quantity} @ {entryPrice:F2} | Stop: {stopPrice:F2} | Target: {targetPrice:F2} | Reason: {reason}");
-				
-				// CRITICAL FIX: Execute entry and immediately set stops/targets
-				ExecuteTradeWithRetry(() => {
-				if (Position.MarketPosition == MarketPosition.Short)
+				// Validate parameters
+				if (quantity <= 0)
 				{
-						ExitShort();
+					Print("❌ Invalid quantity for ML Long command");
+					SendMLCommandConfirmation("go_long", false, "Invalid quantity");
+					return;
 				}
 				
-					// Place the entry order
+				Print($"📈 EXECUTING ML Long Command: {quantity} contracts | Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")} | Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")} | Reason: {reason}");
+				
+				// Execute trade with proper error handling
+				ExecuteTradeWithRetry(() => {
+					// Close any existing short position first
+					if (Position.MarketPosition == MarketPosition.Short)
+					{
+						ExitShort("ML_CloseShort");
+						Print("🔄 Closed existing short position before going long");
+					}
+					
+					// Place the market entry order
 					EnterLong(quantity, "ML_Long");
+					Print($"📈 Long market order placed: {quantity} contracts");
 					
-					// IMMEDIATELY place stop and target orders if values are provided
-					if (stopPrice > 0)
-					{
-						SetStopLoss("ML_Long", CalculationMode.Price, stopPrice, false);
-						stopLoss = stopPrice;
-						Print($"🛡️ STOP LOSS SET: {stopPrice:F2}");
-					}
-					
-					if (targetPrice > 0)
-					{
-						SetProfitTarget("ML_Long", CalculationMode.Price, targetPrice);
-						target1 = targetPrice;
-						Print($"🎯 TAKE PROFIT SET: {targetPrice:F2}");
-					}
-				}, "ML Long Entry with Stops/Targets");
+				}, "ML Long Market Entry");
+
+				// Store stop/target for setting after fill
+				if (stopPrice > 0 || targetPrice > 0)
+				{
+					pendingStopPrice = stopPrice;
+					pendingTargetPrice = targetPrice;
+					pendingOrderName = "ML_Long";
+					Print($"📋 Pending stops/targets stored - Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")}, Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")}");
+				}
 
 				// Update tracking variables
-				entryPrice = Close[0];
 				longEntryPrice = Close[0];
 				
 				// Send confirmation
-				SendMLCommandConfirmation("go_long", true, $"Long entry with stops/targets: {quantity} @ {entryPrice:F2}, Stop: {stopPrice:F2}, Target: {targetPrice:F2}");
+				string confirmMessage = $"Long entry submitted: {quantity} contracts";
+				if (stopPrice > 0 || targetPrice > 0)
+				{
+					confirmMessage += $" (Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")}, Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")})";
+				}
+				SendMLCommandConfirmation("go_long", true, confirmMessage);
 			}
 			catch (Exception ex)
 			{
 				Print($"❌ Error executing ML Long command: {ex.Message}");
 				SendMLCommandConfirmation("go_long", false, $"Error: {ex.Message}");
+				ResetPendingOrders();
 			}
 		}
 		
@@ -463,6 +475,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				if (Position.MarketPosition == MarketPosition.Short)
 				{
 					Print("📊 ML Short command ignored: Already in short position");
+					SendMLCommandConfirmation("go_short", false, "Already in short position");
 					return;
 				}
 				
@@ -471,47 +484,58 @@ namespace NinjaTrader.NinjaScript.Strategies
 				double entryPrice = ParseDouble(command, "entry_price", Close[0]);
 				double stopPrice = ParseDouble(command, "stop_price", 0);
 				double targetPrice = ParseDouble(command, "target_price", 0);
-				string reason = ParseString(command, "reason", "ML Signal");
+				string reason = ParseString(command, "reason", "Manual Trade");
 				
-				Print($"📉 EXECUTING ML Short Command: {quantity} @ {entryPrice:F2} | Stop: {stopPrice:F2} | Target: {targetPrice:F2} | Reason: {reason}");
-				
-				// CRITICAL FIX: Execute entry and immediately set stops/targets
-				ExecuteTradeWithRetry(() => {
-				if (Position.MarketPosition == MarketPosition.Long)
+				// Validate parameters
+				if (quantity <= 0)
 				{
-						ExitLong();
+					Print("❌ Invalid quantity for ML Short command");
+					SendMLCommandConfirmation("go_short", false, "Invalid quantity");
+					return;
 				}
 				
-					// Place the entry order
+				Print($"📉 EXECUTING ML Short Command: {quantity} contracts | Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")} | Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")} | Reason: {reason}");
+				
+				// Execute trade with proper error handling
+				ExecuteTradeWithRetry(() => {
+					// Close any existing long position first
+					if (Position.MarketPosition == MarketPosition.Long)
+					{
+						ExitLong("ML_CloseLong");
+						Print("🔄 Closed existing long position before going short");
+					}
+					
+					// Place the market entry order
 					EnterShort(quantity, "ML_Short");
+					Print($"📉 Short market order placed: {quantity} contracts");
 					
-					// IMMEDIATELY place stop and target orders if values are provided
-					if (stopPrice > 0)
-					{
-						SetStopLoss("ML_Short", CalculationMode.Price, stopPrice, false);
-						stopLoss = stopPrice;
-						Print($"🛡️ STOP LOSS SET: {stopPrice:F2}");
-					}
-					
-					if (targetPrice > 0)
-					{
-						SetProfitTarget("ML_Short", CalculationMode.Price, targetPrice);
-						target1 = targetPrice;
-						Print($"🎯 TAKE PROFIT SET: {targetPrice:F2}");
-					}
-				}, "ML Short Entry with Stops/Targets");
+				}, "ML Short Market Entry");
+
+				// Store stop/target for setting after fill
+				if (stopPrice > 0 || targetPrice > 0)
+				{
+					pendingStopPrice = stopPrice;
+					pendingTargetPrice = targetPrice;
+					pendingOrderName = "ML_Short";
+					Print($"📋 Pending stops/targets stored - Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")}, Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")}");
+				}
 
 				// Update tracking variables
-				entryPrice = Close[0];
 				shortEntryPrice = Close[0];
 				
 				// Send confirmation
-				SendMLCommandConfirmation("go_short", true, $"Short entry with stops/targets: {quantity} @ {entryPrice:F2}, Stop: {stopPrice:F2}, Target: {targetPrice:F2}");
+				string confirmMessage = $"Short entry submitted: {quantity} contracts";
+				if (stopPrice > 0 || targetPrice > 0)
+				{
+					confirmMessage += $" (Stop: {(stopPrice > 0 ? stopPrice.ToString("F2") : "None")}, Target: {(targetPrice > 0 ? targetPrice.ToString("F2") : "None")})";
+				}
+				SendMLCommandConfirmation("go_short", true, confirmMessage);
 			}
 			catch (Exception ex)
 			{
 				Print($"❌ Error executing ML Short command: {ex.Message}");
 				SendMLCommandConfirmation("go_short", false, $"Error: {ex.Message}");
+				ResetPendingOrders();
 			}
 		}
 
@@ -2175,6 +2199,20 @@ namespace NinjaTrader.NinjaScript.Strategies
 			double adjustedStopDistance = stopDistance * volatilityMultiplier;
 			double adjustedStopLoss = isLong ? currentPrice - adjustedStopDistance : currentPrice + adjustedStopDistance;
 			
+			// Validate stop loss price
+			if (isLong && adjustedStopLoss >= currentPrice)
+			{
+				Print($"❌ Invalid ML LONG stop {adjustedStopLoss:F2} >= current price {currentPrice:F2}");
+				adjustedStopLoss = currentPrice - (atr[0] * riskMultiplier);
+				Print($"🔄 Adjusted ML LONG stop to {adjustedStopLoss:F2}");
+			}
+			else if (!isLong && adjustedStopLoss <= currentPrice)
+			{
+				Print($"❌ Invalid ML SHORT stop {adjustedStopLoss:F2} <= current price {currentPrice:F2}");
+				adjustedStopLoss = currentPrice + (atr[0] * riskMultiplier);
+				Print($"🔄 Adjusted ML SHORT stop to {adjustedStopLoss:F2}");
+			}
+			
 			Print($"🤖 ML STOP ADJUSTMENT: Base={baseStopLoss:F2}, Volatility={mlVolatilityPrediction:F2}, Multiplier={volatilityMultiplier:F2}, Final={adjustedStopLoss:F2}");
 			
 			return adjustedStopLoss;
@@ -2202,6 +2240,20 @@ namespace NinjaTrader.NinjaScript.Strategies
 			
 			double adjustedTargetDistance = targetDistance * confidenceMultiplier;
 			double adjustedTarget = isLong ? currentPrice + adjustedTargetDistance : currentPrice - adjustedTargetDistance;
+			
+			// Validate target price
+			if (isLong && adjustedTarget <= currentPrice)
+			{
+				Print($"❌ Invalid ML LONG target {adjustedTarget:F2} <= current price {currentPrice:F2}");
+				adjustedTarget = currentPrice + (atr[0] * 2.0);
+				Print($"🔄 Adjusted ML LONG target to {adjustedTarget:F2}");
+			}
+			else if (!isLong && adjustedTarget >= currentPrice)
+			{
+				Print($"❌ Invalid ML SHORT target {adjustedTarget:F2} >= current price {currentPrice:F2}");
+				adjustedTarget = currentPrice - (atr[0] * 2.0);
+				Print($"🔄 Adjusted ML SHORT target to {adjustedTarget:F2}");
+			}
 			
 			Print($"🤖 ML TARGET ADJUSTMENT: Base={baseTarget:F2}, Confidence={mlConfidenceLevel:F2}, Regime={mlMarketRegime}, Final={adjustedTarget:F2}");
 			
@@ -3167,6 +3219,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 			// ML-ADJUSTED STOP LOSS
 			double stopLoss = GetMLAdjustedStopLoss(baseStopLoss, true);
 			
+			// Validate stop loss is below current price
+			if (stopLoss >= Close[0])
+			{
+				Print($"❌ Invalid stop loss price {stopLoss:F2} >= current price {Close[0]:F2}");
+				return;
+			}
+			
 			// Account-based position sizing
 			double accountValue = Account.Get(AccountItem.NetLiquidation, Currency.UsDollar);
 			double riskDollars = accountValue * riskPerTrade;
@@ -3183,6 +3242,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 			// ML-ADJUSTED TARGETS
 			double target1 = GetMLAdjustedTarget(baseTarget1, true);
 			double target2 = GetMLAdjustedTarget(baseTarget2, true);
+			
+			// Validate targets are above entry
+			if (target1 <= Close[0] || target2 <= Close[0])
+			{
+				Print($"❌ Invalid target prices: T1={target1:F2}, T2={target2:F2} must be > entry {Close[0]:F2}");
+				return;
+			}
 			
 			this.stopLoss = stopLoss;
 			this.target1 = target1;
@@ -3204,30 +3270,38 @@ namespace NinjaTrader.NinjaScript.Strategies
 				int firstTargetQuantity = (int)Math.Ceiling(finalQuantity * 0.6);
 				int secondTargetQuantity = finalQuantity - firstTargetQuantity;
 				
+				// Store pending stop/target prices
+				pendingStopPrice = stopLoss;
+				pendingTargetPrice = target1;
+				pendingOrderName = "Long Entry T1";
+				
 				// First position with T1 target and stop
 				EnterLong(firstTargetQuantity, "Long Entry T1");
-				SetStopLoss("Long Entry T1", CalculationMode.Price, stopLoss, false);
-				SetProfitTarget("Long Entry T1", CalculationMode.Price, target1);
 				TrackEntry("Long", "T1", Close[0]);
 				
 				// Second position with T2 target and separate stop
+				pendingStopPrice = stopLoss;
+				pendingTargetPrice = target2;
+				pendingOrderName = "Long Entry T2";
+				
 				EnterLong(secondTargetQuantity, "Long Entry T2");
-				SetStopLoss("Long Entry T2", CalculationMode.Price, stopLoss, false);
-				SetProfitTarget("Long Entry T2", CalculationMode.Price, target2);
 				TrackEntry("Long", "T2", Close[0]);
 				
 				longEntryPrice = Close[0];
 				movedStopToBreakevenLong = false;
 				
 				Print($"✅ LONG ENTRY: T1 Qty={firstTargetQuantity} @ {target1:F2}, T2 Qty={secondTargetQuantity} @ {target2:F2}");
-				Print($"🛡️ STOPS: Both positions protected @ {stopLoss:F2}");
+				Print($"🛡️ STOPS: Both positions will be protected @ {stopLoss:F2} after fill");
 			}
 			else
 			{
+				// Store pending stop/target prices
+				pendingStopPrice = stopLoss;
+				pendingTargetPrice = target2;
+				pendingOrderName = "Long Entry";
+				
 				// Simple single entry
-				EnterLong(finalQuantity);
-				SetStopLoss(CalculationMode.Price, stopLoss);
-				SetProfitTarget(CalculationMode.Price, target2);
+				EnterLong(finalQuantity, "Long Entry");
 				TrackEntry("Long", "Single", Close[0]);
 				
 				Print($"✅ LONG ENTRY: Qty={finalQuantity}, Target={target2:F2}, Stop={stopLoss:F2}");
@@ -3272,6 +3346,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 			// ML-ADJUSTED STOP LOSS
 			double stopLoss = GetMLAdjustedStopLoss(baseStopLoss, false);
 			
+			// Validate stop loss is above current price
+			if (stopLoss <= Close[0])
+			{
+				Print($"❌ Invalid stop loss price {stopLoss:F2} <= current price {Close[0]:F2}");
+				return;
+			}
+			
 			// Account-based position sizing
 			double accountValue = Account.Get(AccountItem.NetLiquidation, Currency.UsDollar);
 			double riskDollars = accountValue * riskPerTrade;
@@ -3288,6 +3369,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 			// ML-ADJUSTED TARGETS
 			double target1 = GetMLAdjustedTarget(baseTarget1, false);
 			double target2 = GetMLAdjustedTarget(baseTarget2, false);
+			
+			// Validate targets are below entry
+			if (target1 >= Close[0] || target2 >= Close[0])
+			{
+				Print($"❌ Invalid target prices: T1={target1:F2}, T2={target2:F2} must be < entry {Close[0]:F2}");
+				return;
+			}
 			
 			this.stopLoss = stopLoss;
 			this.target1 = target1;
@@ -3368,40 +3456,59 @@ namespace NinjaTrader.NinjaScript.Strategies
 			{
 				Print($"EXECUTION UPDATE: Name={execution.Order.Name}, State={execution.Order.OrderState}, Price={price:F2}, Qty={quantity}");
 
-				// CRITICAL SAFETY: Check if this is an entry order and ensure stops/targets are placed
-				if (execution.Order.Name.Contains("Long") || execution.Order.Name.Contains("Short") || execution.Order.Name.Contains("ML_"))
-				{
-					// Wait a moment for the position to update, then ensure stops/targets exist
-					Task.Delay(100).ContinueWith(_ => {
-						try
-						{
-							EnsureAllPositionsHaveStops();
-							EnsureAllPositionsHaveTargets();
-						}
-						catch (Exception ex)
-						{
-							Print($"❌ Error in post-execution safety check: {ex.Message}");
-						}
-					});
-				}
-
-				// Check if this is the fill for our pending entry order (legacy support)
+				// Check if this is the fill for our pending entry order
 				if (!string.IsNullOrEmpty(pendingOrderName) && execution.Order.Name == pendingOrderName)
 				{
 					Print($"✅ Entry order '{pendingOrderName}' filled. Placing Stop/Target orders.");
 					
-					// Place pending stop loss order
+					// Validate and place stop loss order
 					if (pendingStopPrice > 0)
 					{
-						stopLoss = pendingStopPrice;
-						ExecuteTradeWithRetry(() => SetStopLoss(pendingOrderName, CalculationMode.Price, stopLoss, false), "Set Stop Loss on Fill");
+						bool isValidStop = false;
+						if (marketPosition == MarketPosition.Long && pendingStopPrice < price)
+						{
+							isValidStop = true;
+						}
+						else if (marketPosition == MarketPosition.Short && pendingStopPrice > price)
+						{
+							isValidStop = true;
+						}
+						
+						if (isValidStop)
+						{
+							stopLoss = pendingStopPrice;
+							ExecuteTradeWithRetry(() => SetStopLoss(pendingOrderName, CalculationMode.Price, stopLoss, false), "Set Stop Loss on Fill");
+							Print($"🛡️ {marketPosition} stop set @ {stopLoss:F2}");
+						}
+						else
+						{
+							Print($"⚠️ Invalid stop price {pendingStopPrice:F2} for {marketPosition} entry @ {price:F2}");
+						}
 					}
 
-					// Place pending take profit order
+					// Validate and place take profit order
 					if (pendingTargetPrice > 0)
 					{
-						target1 = pendingTargetPrice;
-						ExecuteTradeWithRetry(() => SetProfitTarget(pendingOrderName, CalculationMode.Price, target1), "Set Profit Target on Fill");
+						bool isValidTarget = false;
+						if (marketPosition == MarketPosition.Long && pendingTargetPrice > price)
+						{
+							isValidTarget = true;
+						}
+						else if (marketPosition == MarketPosition.Short && pendingTargetPrice < price)
+						{
+							isValidTarget = true;
+						}
+						
+						if (isValidTarget)
+						{
+							target1 = pendingTargetPrice;
+							ExecuteTradeWithRetry(() => SetProfitTarget(pendingOrderName, CalculationMode.Price, target1), "Set Profit Target on Fill");
+							Print($"🎯 {marketPosition} target set @ {target1:F2}");
+						}
+						else
+						{
+							Print($"⚠️ Invalid target price {pendingTargetPrice:F2} for {marketPosition} entry @ {price:F2}");
+						}
 					}
 					
 					// Record the actual entry after fill
@@ -3417,6 +3524,19 @@ namespace NinjaTrader.NinjaScript.Strategies
 				{
 					TrackExitAndLog(execution.Price);
 				}
+				
+				// Double-check protection after a delay
+				Task.Delay(100).ContinueWith(_ => {
+					try
+					{
+						EnsureAllPositionsHaveStops();
+						EnsureAllPositionsHaveTargets();
+					}
+					catch (Exception ex)
+					{
+						Print($"❌ Error in post-execution safety check: {ex.Message}");
+					}
+				});
 			}
 		}
 
@@ -3453,6 +3573,15 @@ namespace NinjaTrader.NinjaScript.Strategies
 						if (Position.MarketPosition == MarketPosition.Long)
 						{
 							double emergencyTarget = Position.AveragePrice + (atr[0] * 2.0); // 2x ATR target
+							
+							// Validate emergency target is above current price
+							if (emergencyTarget <= Close[0])
+							{
+								Print($"❌ Invalid emergency LONG target {emergencyTarget:F2} <= current price {Close[0]:F2}");
+								emergencyTarget = Close[0] + (atr[0] * 2.0);
+								Print($"🔄 Adjusted emergency LONG target to {emergencyTarget:F2}");
+							}
+							
 							SetProfitTarget(CalculationMode.Price, emergencyTarget);
 							target1 = emergencyTarget;
 							Print($"🎯 Applied emergency LONG target @ {emergencyTarget:F2}");
@@ -3460,6 +3589,15 @@ namespace NinjaTrader.NinjaScript.Strategies
 						else if (Position.MarketPosition == MarketPosition.Short)
 						{
 							double emergencyTarget = Position.AveragePrice - (atr[0] * 2.0); // 2x ATR target
+							
+							// Validate emergency target is below current price
+							if (emergencyTarget >= Close[0])
+							{
+								Print($"❌ Invalid emergency SHORT target {emergencyTarget:F2} >= current price {Close[0]:F2}");
+								emergencyTarget = Close[0] - (atr[0] * 2.0);
+								Print($"🔄 Adjusted emergency SHORT target to {emergencyTarget:F2}");
+							}
+							
 							SetProfitTarget(CalculationMode.Price, emergencyTarget);
 							target1 = emergencyTarget;
 							Print($"🎯 Applied emergency SHORT target @ {emergencyTarget:F2}");
@@ -4017,12 +4155,30 @@ namespace NinjaTrader.NinjaScript.Strategies
 						if (Position.MarketPosition == MarketPosition.Long)
 						{
 							double emergencyStop = Position.AveragePrice - (atr[0] * riskMultiplier);
+							
+							// Validate emergency stop is below current price
+							if (emergencyStop >= Close[0])
+							{
+								Print($"❌ Invalid emergency LONG stop {emergencyStop:F2} >= current price {Close[0]:F2}");
+								emergencyStop = Close[0] - (atr[0] * riskMultiplier);
+								Print($"🔄 Adjusted emergency LONG stop to {emergencyStop:F2}");
+							}
+							
 							SetStopLoss(CalculationMode.Price, emergencyStop);
 							Print($"🛡️ Applied emergency LONG stop @ {emergencyStop:F2}");
 						}
 						else if (Position.MarketPosition == MarketPosition.Short)
 						{
 							double emergencyStop = Position.AveragePrice + (atr[0] * riskMultiplier);
+							
+							// Validate emergency stop is above current price
+							if (emergencyStop <= Close[0])
+							{
+								Print($"❌ Invalid emergency SHORT stop {emergencyStop:F2} <= current price {Close[0]:F2}");
+								emergencyStop = Close[0] + (atr[0] * riskMultiplier);
+								Print($"🔄 Adjusted emergency SHORT stop to {emergencyStop:F2}");
+							}
+							
 							SetStopLoss(CalculationMode.Price, emergencyStop);
 							Print($"🛡️ Applied emergency SHORT stop @ {emergencyStop:F2}");
 						}

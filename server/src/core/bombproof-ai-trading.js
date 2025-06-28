@@ -2,6 +2,61 @@
 const EventEmitter = require('events');
 const logger = require('../utils/logger');
 
+// Add trading milestones configuration
+const TRADING_MILESTONES = {
+  DISCOVERY: {
+    trades: 0,
+    config: {
+      minConfidence: 0.50,
+      maxDailyLoss: 3000,
+      maxConsecutiveLosses: 7,
+      minProfitTarget: 10,
+      status: "Discovering patterns"
+    }
+  },
+  FILTERING: {
+    trades: 50,
+    config: {
+      minConfidence: 0.60,
+      maxDailyLoss: 2000,
+      maxConsecutiveLosses: 5,
+      minProfitTarget: 15,
+      status: "Filtering bad patterns"
+    }
+  },
+  OPTIMIZING: {
+    trades: 100,
+    config: {
+      minConfidence: 0.65,
+      maxDailyLoss: 1500,
+      maxConsecutiveLosses: 4,
+      status: "Optimizing parameters"
+    }
+  },
+  REFINING: {
+    trades: 200,
+    config: {
+      minConfidence: 0.70,
+      maxDailyLoss: 1000,
+      maxConsecutiveLosses: 3,
+      status: "Fine-tuning system"
+    }
+  },
+  PRODUCTION: {
+    trades: 300,
+    config: {
+      minConfidence: 0.75,
+      maxDailyLoss: 1000,
+      status: "Production ready"
+    },
+    requirements: {
+      minWinRate: 0.52,
+      minProfitFactor: 1.2,
+      maxDrawdown: 0.15
+    }
+  }
+};
+
 class BombproofAITradingSystem extends EventEmitter {
   constructor(dependencies) {
     super();
@@ -19,6 +74,13 @@ class BombproofAITradingSystem extends EventEmitter {
     this.pendingTrades = new Map();
     this.executedTrades = new Map();
     this.tradeHistory = [];
+    
+    // Evolution tracking
+    this.milestonesReached = new Set();
+    this.blacklistedPatterns = new Set();
+    this.blacklistedHours = new Set();
+    this.profitableHours = [];
+    this.unprofitableHours = [];
     
     // Risk management state
     this.riskState = {
@@ -468,6 +530,9 @@ class BombproofAITradingSystem extends EventEmitter {
       
       // 5. Pattern learning
       this.learnPatterns(tradeResult);
+      
+      // 6. Evolution evaluation
+      await this.evaluateAfterTrade();
       
       logger.info('📚 Learned from trade:', {
         profit: tradeResult.profit,
@@ -1174,6 +1239,168 @@ class BombproofAITradingSystem extends EventEmitter {
     await this.saveState();
     
     logger.info('✅ AI Trading System stopped');
+  }
+
+  async checkMilestones() {
+    const totalTrades = this.tradeTracker?.statistics.overall.totalTrades || 0;
+    
+    for (const [name, milestone] of Object.entries(TRADING_MILESTONES)) {
+      if (totalTrades >= milestone.trades && !this.milestonesReached.has(name)) {
+        
+        // Check requirements if any
+        if (milestone.requirements) {
+          const stats = this.tradeTracker.statistics.overall;
+          if (stats.winRate < milestone.requirements.minWinRate ||
+              stats.profitFactor < milestone.requirements.minProfitFactor ||
+              stats.maxDrawdown > milestone.requirements.maxDrawdown) {
+            logger.warn(`Milestone ${name} reached but requirements not met`, {
+              trades: totalTrades,
+              requirements: milestone.requirements,
+              actual: {
+                winRate: stats.winRate,
+                profitFactor: stats.profitFactor,
+                maxDrawdown: stats.maxDrawdown
+              }
+            });
+            continue;
+          }
+        }
+        
+        // Apply milestone configuration
+        Object.entries(milestone.config).forEach(([key, value]) => {
+          if (key !== 'status' && this.riskState[key] !== undefined) {
+            this.riskState[key] = value;
+          }
+          if (this.confidenceThresholds[key] !== undefined) {
+            this.confidenceThresholds.current = value;
+          }
+        });
+        
+        this.milestonesReached.add(name);
+        logger.info(`🎯 Milestone reached: ${name}`, milestone.config);
+        this.emit('milestoneReached', { name, config: milestone.config });
+      }
+    }
+  }
+
+  async evaluateAfterTrade() {
+    const stats = this.tradeTracker?.statistics.overall || {};
+    const totalTrades = stats.totalTrades || 0;
+    
+    // Check milestones
+    await this.checkMilestones();
+    
+    // Pattern evaluation every 25 trades
+    if (totalTrades > 0 && totalTrades % 25 === 0) {
+      await this.evaluatePatterns();
+    }
+    
+    // Hour evaluation every 30 trades
+    if (totalTrades > 0 && totalTrades % 30 === 0) {
+      await this.evaluateHours();
+    }
+    
+    // Emergency adjustments
+    if (stats.winRate < 0.30 && totalTrades > 20) {
+      this.emergencyTighten();
+    }
+  }
+
+  async evaluatePatterns() {
+    const patterns = this.tradeTracker?.statistics.byPattern || {};
+    
+    Object.entries(patterns).forEach(([pattern, stats]) => {
+      if (stats.trades >= 5) {
+        if (stats.winRate < 0.35) {
+          this.blacklistedPatterns.add(pattern);
+          logger.info(`❌ Blacklisted pattern: ${pattern}`, stats);
+        } else if (stats.winRate > 0.65) {
+          logger.info(`✅ Profitable pattern found: ${pattern}`, stats);
+        }
+      }
+    });
+  }
+
+  async evaluateHours() {
+    const hours = this.tradeTracker?.statistics.byHour || {};
+    
+    Object.entries(hours).forEach(([hour, stats]) => {
+      if (stats.trades >= 5) {
+        if (stats.winRate < 0.35) {
+          this.blacklistedHours.add(parseInt(hour));
+          logger.info(`❌ Blacklisted hour: ${hour}:00`, stats);
+        } else if (stats.winRate > 0.60) {
+          this.profitableHours.push(parseInt(hour));
+          logger.info(`✅ Profitable hour found: ${hour}:00`, stats);
+        }
+      }
+    });
+  }
+
+  emergencyTighten() {
+    this.confidenceThresholds.current = Math.min(
+      this.confidenceThresholds.current + 0.10,
+      0.90
+    );
+    logger.warn('🚨 Emergency tightening applied', {
+      newConfidence: this.confidenceThresholds.current
+    });
+  }
+
+  getProgressReport() {
+    const stats = this.tradeTracker?.statistics.overall || {};
+    const currentMilestone = this.getCurrentMilestone();
+    const nextMilestone = this.getNextMilestone();
+    
+    return {
+      currentPhase: currentMilestone?.config.status || 'Initializing',
+      totalTrades: stats.totalTrades || 0,
+      tradesToNext: nextMilestone ? nextMilestone.trades - (stats.totalTrades || 0) : 0,
+      
+      performance: {
+        winRate: `${((stats.winRate || 0) * 100).toFixed(1)}%`,
+        avgWin: `$${(stats.avgWin || 0).toFixed(2)}`,
+        avgLoss: `$${(stats.avgLoss || 0).toFixed(2)}`,
+        profitFactor: (stats.profitFactor || 0).toFixed(2)
+      },
+      
+      discovered: {
+        blacklistedPatterns: this.blacklistedPatterns.size,
+        blacklistedHours: this.blacklistedHours.size,
+        profitableHours: this.profitableHours.length
+      },
+      
+      currentSettings: {
+        confidence: this.confidenceThresholds.current,
+        dailyLoss: this.riskState.maxDailyLoss,
+        profitTarget: this.profitState?.targetMinProfit || 25
+      }
+    };
+  }
+
+  getCurrentMilestone() {
+    const totalTrades = this.tradeTracker?.statistics.overall.totalTrades || 0;
+    let current = null;
+    
+    for (const [name, milestone] of Object.entries(TRADING_MILESTONES)) {
+      if (totalTrades >= milestone.trades) {
+        current = milestone;
+      }
+    }
+    
+    return current;
+  }
+
+  getNextMilestone() {
+    const totalTrades = this.tradeTracker?.statistics.overall.totalTrades || 0;
+    
+    for (const [name, milestone] of Object.entries(TRADING_MILESTONES)) {
+      if (totalTrades < milestone.trades) {
+        return milestone;
+      }
+    }
+    
+    return null;
   }
 }
 

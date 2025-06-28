@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect, useRef, useCallback } from 'react'
 import io, { Socket } from 'socket.io-client'
 import { transformKeys } from '@/lib/utils'
@@ -147,6 +149,77 @@ interface ConnectionState {
   latency: number
 }
 
+export interface PerformanceMetrics {
+  models: {
+    [key: string]: {
+      predictions: number
+      correct: number
+      accuracy: number
+      lastUpdate: string
+    }
+  }
+  trading: {
+    dailyPnL: number
+    weeklyPnL: number
+    monthlyPnL: number
+    winRate: number
+    profitFactor: number
+    sharpeRatio: number
+    maxDrawdown: number
+    currentDrawdown: number
+    consecutiveWins: number
+    consecutiveLosses: number
+  }
+  risk: {
+    positionsOpen: number
+    totalExposure: number
+    marginUsed: number
+    riskScore: number
+    dailyVaR: number
+    stressTestResult: number
+  }
+  health: {
+    uptime: number
+    lastHeartbeat: string
+    cpuUsage: number
+    memoryUsage: number
+    tensorflowMemory: number
+    apiLatency: number
+    predictionLatency: number
+    ninjaConnection: boolean
+    score: number
+  }
+  learning: {
+    totalTradesAnalyzed: number
+    patternsIdentified: number
+    modelUpdates: number
+    lastModelUpdate: string
+    adaptationRate: number
+    learningEfficiency: number
+  }
+}
+
+export interface SystemAlert {
+  id: string
+  type: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  message: string
+  timestamp: string
+  data?: any
+}
+
+export interface EvolutionProgress {
+  currentPhase: string
+  totalTrades: number
+  tradesToNext: number
+  performance: {
+    winRate: number
+    profitFactor: number
+    avgWin: number
+    avgLoss: number
+  }
+}
+
 // Use the correct port for the ML server
 const SOCKET_URL = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3001` : 'http://localhost:3001'
 
@@ -171,6 +244,9 @@ export function useSocket() {
     isConnected: false,
     latency: 0
   })
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null)
+  const [systemAlerts, setSystemAlerts] = useState<SystemAlert[]>([])
+  const [evolutionProgress, setEvolutionProgress] = useState<EvolutionProgress | null>(null)
   
   const socketRef = useRef<Socket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
@@ -193,7 +269,7 @@ export function useSocket() {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000,
-        transports: ['websocket', 'polling']
+        transports: ['websocket']
       })
 
       socketRef.current = socket
@@ -203,60 +279,32 @@ export function useSocket() {
         console.log('Connected to ML server')
         setConnectionState(prev => ({ ...prev, isConnected: true }))
         
-        // Start measuring latency
-        latencyIntervalRef.current = setInterval(() => {
-          const start = Date.now()
-          socket.emit('ping', () => {
-            const latency = Date.now() - start
-            setConnectionState(prev => ({ ...prev, latency }))
-          })
-        }, 5000)
-      })
-
-      socket.on('disconnect', () => {
-        if (!isSubscribed) return
-        console.log('Disconnected from ML server')
-        setConnectionState(prev => ({ ...prev, isConnected: false }))
-        
-        // Clear latency interval
-        if (latencyIntervalRef.current) {
-          clearInterval(latencyIntervalRef.current)
-        }
-      })
-
-      socket.on('error', (error: Error) => {
-        console.error('Socket error:', error)
-        if (!isSubscribed) return
-        
-        // Attempt reconnection
-        socket.disconnect()
-        reconnectTimeoutRef.current = setTimeout(connectSocket, 2000)
+        // Request initial trading progress
+        socket.emit('get_trading_progress', (progress) => {
+          console.log('Initial trading progress:', progress)
+        })
       })
 
       socket.on('market_data', (data: any) => {
-        if (!isSubscribed) return;
-        if (!validateData<MarketData>(data, 'market_data')) {
-          console.error('Invalid market data:', data);
-          return;
+        if (!isSubscribed) return
+        if (validateData<MarketData>(data, 'market_data')) {
+          setStrategyData(prev => ({
+            ...prev,
+            marketData: data
+          }))
+          setMarketDataHistory(prev => [...prev.slice(-100), data])
         }
-        setStrategyData(prev => ({
-          ...prev,
-          marketData: data,
-        }));
-        setMarketDataHistory(prev => [...prev, data].slice(-100));
-      });
+      })
 
       socket.on('strategy_status', (data: any) => {
-        if (!isSubscribed) return;
-        if (!validateData<StrategyStatus>(data, 'strategy_status')) {
-          console.error('Invalid strategy status:', data);
-          return;
+        if (!isSubscribed) return
+        if (validateData<StrategyStatus>(data, 'strategy_status')) {
+          setStrategyData(prev => ({
+            ...prev,
+            strategyStatus: data
+          }))
         }
-        setStrategyData(prev => ({
-          ...prev,
-          strategyStatus: data
-        }));
-      });
+      })
 
       socket.on('trade', (data: any) => {
         if (!isSubscribed) return;
@@ -316,23 +364,66 @@ export function useSocket() {
           }
         }));
       });
+
+      socket.on('evolution_progress', (progress: EvolutionProgress) => {
+        if (!isSubscribed) return
+        console.log('Received evolution progress:', progress)
+        setEvolutionProgress(progress)
+      })
+
+      socket.on('trading_progress', (progress: any) => {
+        if (!isSubscribed) return
+        console.log('Received trading progress:', progress)
+        setPerformanceMetrics(prev => prev ? {
+          ...prev,
+          trading: {
+            ...prev.trading,
+            ...progress.trading
+          },
+          risk: {
+            ...prev.risk,
+            ...progress.risk
+          }
+        } : null)
+      })
+
+      socket.on('performance_metrics', (data: PerformanceMetrics) => {
+        if (!isSubscribed) return
+        console.log('Received performance metrics:', data)
+        setPerformanceMetrics(data)
+      })
+
+      socket.on('system_alert', (alert: SystemAlert) => {
+        if (!isSubscribed) return
+        console.log('Received system alert:', alert)
+        setSystemAlerts(prev => [alert, ...prev].slice(0, 10))
+      })
+
+      socket.on('disconnect', () => {
+        if (!isSubscribed) return
+        console.log('Disconnected from ML server')
+        setConnectionState(prev => ({ ...prev, isConnected: false }))
+      })
+
+      socket.on('error', (error: Error) => {
+        if (!isSubscribed) return
+        console.error('Socket error:', error)
+        setConnectionState(prev => ({ ...prev, isConnected: false }))
+      })
     }
 
-    // Initial connection
     connectSocket()
 
     // Cleanup function
     return () => {
       isSubscribed = false
-      
       if (socketRef.current) {
+        console.log('Cleaning up socket connection')
         socketRef.current.disconnect()
       }
-      
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
-      
       if (latencyIntervalRef.current) {
         clearInterval(latencyIntervalRef.current)
       }
@@ -422,8 +513,11 @@ export function useSocket() {
     tradeHistory,
     mlPrediction,
     connectionState,
+    performanceMetrics,
+    systemAlerts,
     updateServerSettings,
     getCurrentSettings,
-    sendManualTrade
+    sendManualTrade,
+    evolutionProgress
   }
 } 

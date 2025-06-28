@@ -1,8 +1,15 @@
 {
-  "minConfidence": 0.47,
+  "minConfidence": 0.6,
   "autoTradingEnabled": true,
   "strongConfidence": 0.8,
   "minStrength": 0.2,
+  "ensembleWeights": {
+    "lstm": 0.3,
+    "transformer": 0.25,
+    "randomForest": 0.2,
+    "xgboost": 0.15,
+    "dqn": 0.1
+  },
   "trailingConfidenceThreshold": 0.6,
   "trailingUpdateInterval": 15,
   "maxStopMovementAtr": 2,

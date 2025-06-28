@@ -160,6 +160,11 @@ class NinjaTraderService extends EventEmitter {
           break;
           
         case 'market_data':
+          logger.info('📊 Market data received:', { 
+            instrument: jsonData.instrument,
+            price: jsonData.price,
+            timestamp: jsonData.timestamp
+          });
           this.emit('marketData', jsonData);
           break;
           
