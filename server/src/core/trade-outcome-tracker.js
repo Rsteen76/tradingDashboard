@@ -9,6 +9,7 @@ class TradeOutcomeTracker extends EventEmitter {
     
     this.adaptiveLearning = dependencies.adaptiveLearning;
     this.dataCollector = dependencies.dataCollector;
+    this.profitMaximizer = dependencies.profitMaximizer; // Store ProfitMaximizer
     this.logger = dependencies.logger;
     
     // Active trades being tracked
@@ -286,6 +287,34 @@ class TradeOutcomeTracker extends EventEmitter {
     
     // 3. Update pattern statistics
     await this.updatePatternStatistics(pattern, trade);
+
+    // 4. Send to Profit Maximizer for its learning
+    if (this.profitMaximizer && this.profitMaximizer.isInitialized) {
+      const tradeResultForPM = {
+        // Fields expected by ProfitMaximizer.learnFromTradeOutcome()
+        // Ensure these align with what ProfitMaximizer actually needs.
+        // Based on ProfitMaximizer.identifyProfitPatterns and updatePerformanceMetrics:
+        marketRegime: trade.marketRegime, // Market regime at entry
+        direction: trade.direction, // 'long' or 'short'
+        confidence: trade.confidence, // AI confidence at entry
+        profit: trade.finalPnL, // Actual profit/loss of the trade
+        // Potentially add more fields if PM's learning evolves
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice,
+        quantity: trade.quantity,
+        durationMinutes: trade.metrics?.durationMinutes,
+        initialStopLoss: trade.stopLoss, // Original stop loss
+        initialTakeProfit: trade.takeProfit, // Original take profit
+        // Pass any specific AI predictions or context used by ProfitMaximizer if available from 'trade' object
+        // e.g., trade.aiPrediction?.profitMaximizerContext
+      };
+      try {
+        await this.profitMaximizer.learnFromTradeOutcome(tradeResultForPM);
+        this.logger.info('🧠 ProfitMaximizer learned from trade outcome', { tradeId: trade.id });
+      } catch (pmError) {
+        this.logger.error('Error during ProfitMaximizer learning:', { tradeId: trade.id, error: pmError.message });
+      }
+    }
   }
 
   // Update running statistics

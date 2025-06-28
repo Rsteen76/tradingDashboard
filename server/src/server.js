@@ -134,6 +134,7 @@ class MLTradingServer {
             this.tradeTracker = new TradeOutcomeTracker({
                 adaptiveLearning: this.adaptiveLearning,
                 dataCollector: this.dataCollector,
+                profitMaximizer: this.profitMaximizer, // Pass ProfitMaximizer instance
                 logger
             });
             await this.tradeTracker.initialize();
@@ -443,10 +444,41 @@ class MLTradingServer {
                             timestamp: new Date().toISOString(),
                             stop_price: payload.stop_price,
                             target_price: payload.target_price,
-                            reason: payload.reason || 'Manual Trade'
+                            reason: payload.reason || 'Manual Trade',
+                            // Pass through AI optimization data if present
+                            ai_optimization_data: payload.ai_optimization_data,
+                            use_ai_optimization: payload.use_ai_optimization,
+                            isManualTrade: true // Explicitly flag as manual
                         });
-                        if (typeof ack === 'function') {
-                            ack({ success: sent > 0 });
+
+                        if (sent > 0) {
+                            if (typeof ack === 'function') ack({ success: true });
+                            // If AI optimization was used for this manual trade, notify Bombproof/PositionManager
+                            // to potentially start smart trailing for it with isManual=true.
+                            if (payload.use_ai_optimization && this.bombproofTrading) {
+                                // We need a tradeId here. Assuming ninjaService.sendTradingCommand
+                                // might return one or we generate one before sending.
+                                // For now, let's simulate or assume payload includes a temporary client-side ID
+                                // that can be confirmed/updated upon execution.
+                                const tradeDetailsForMonitoring = {
+                                    tradeId: payload.clientTradeId || `manual_${Date.now()}`, // Needs robust ID generation
+                                    instrument: payload.instrument || 'ES',
+                                    direction: payload.command.includes('long') ? 'LONG' : 'SHORT', // Basic inference
+                                    quantity: payload.quantity || 1,
+                                    // Use entryPrice from AI optimization data if available, else current_price from payload (if sent)
+                                    price: payload.ai_optimization_data?.entryPrice || payload.current_price,
+                                    stop_price: payload.stop_price,
+                                    target_price: payload.target_price,
+                                    isManual: true,
+                                    isAiOptimized: true,
+                                    reason: payload.reason || 'Manual AI Optimized Trade',
+                                    // executionTime will be set upon actual execution confirmation
+                                };
+                                logger.info('Notifying Bombproof system of AI-optimized manual trade', tradeDetailsForMonitoring);
+                                this.bombproofTrading.handleNewManualTrade(tradeDetailsForMonitoring);
+                            }
+                        } else {
+                             if (typeof ack === 'function') ack({ success: false, error: 'failed_to_send_command' });
                         }
                     } else {
                         logger.warn('NinjaTraderService not initialized');
@@ -707,7 +739,25 @@ class MLTradingServer {
             }
 
             if (this.io) {
-                this.io.emit('strategy_status', data);
+                let augmentedData = { ...data };
+                let isKnownManualTrade = false;
+
+                // Attempt to identify if this status update pertains to a known manual trade
+                // This logic is simplified and relies on instrument matching.
+                // A robust solution needs proper trade ID mapping from NT execution back to backend ID.
+                if (data.instrument && this.bombproofTrading && this.bombproofTrading.executedTrades) {
+                    for (const [tradeId, trade] of this.bombproofTrading.executedTrades.entries()) {
+                        if (trade.instrument === data.instrument && this.bombproofTrading.activeManualTradeIds.has(tradeId)) {
+                            augmentedData.is_manual_trade = true;
+                            augmentedData.active_trailing_algorithm = trade.active_trailing_algorithm || 'adaptive_atr'; // Or get from smartTrailing state
+                            augmentedData.current_smart_stop = trade.current_smart_stop || trade.stop_price;
+                            isKnownManualTrade = true;
+                            break;
+                        }
+                    }
+                }
+
+                this.io.emit('strategy_status', augmentedData);
                 
                 // Also emit strategy_data with current settings for dashboard synchronization
                 const currentSettings = this.mlEngine ? this.mlEngine.settings : {};
@@ -718,12 +768,12 @@ class MLTradingServer {
                 });
                 
                 this.io.emit('strategy_data', {
-                    strategyStatus: data,
+                    strategyStatus: augmentedData, // Use augmented data here too
                     riskManagement: {
                         ...currentSettings,
-                        trading_disabled: false, // Default, should come from position manager
-                        daily_loss: 0, // Default, should come from position manager
-                        consecutive_losses: 0 // Default, should come from position manager
+                        trading_disabled: augmentedData.trading_disabled ?? false,
+                        daily_loss: augmentedData.daily_loss ?? 0,
+                        consecutive_losses: augmentedData.consecutive_losses ?? 0
                     },
                     timestamp: new Date().toISOString()
                 });

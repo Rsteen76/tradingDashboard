@@ -81,6 +81,7 @@ class BombproofAITradingSystem extends EventEmitter {
     this.blacklistedHours = new Set();
     this.profitableHours = [];
     this.unprofitableHours = [];
+    this.activeManualTradeIds = new Set(); // Track active manual trade IDs
     
     // Risk management state
     this.riskState = {
@@ -183,7 +184,9 @@ class BombproofAITradingSystem extends EventEmitter {
       const positionSize = await this.calculateOptimalPositionSize(profitOptimization, positionState);
       
       // 7. Generate trade command
-      const tradeCommand = this.generateTradeCommand(profitOptimization, positionSize);
+      // The direction should come from the AI prediction that led to this optimization
+      const tradeDirection = aiPredictions.direction; // e.g., 'LONG', 'SHORT', or 'up'/'down' if that's what generateEnsemblePrediction returns
+      const tradeCommand = this.generateTradeCommand(profitOptimization, positionSize, tradeDirection, marketData.instrument);
       
       // 8. Final safety checks
       const safetyCheck = await this.runFinalSafetyChecks(tradeCommand);
@@ -1001,17 +1004,41 @@ class BombproofAITradingSystem extends EventEmitter {
     this.emit('tradeRejected', { optimization, reasons, timestamp: new Date() });
   }
 
-  generateTradeCommand(optimization, positionSize) {
+  generateTradeCommand(optimization, positionSize, tradeDirection, instrument) {
+    // tradeDirection comes from aiPredictions.direction (e.g., 'LONG', 'SHORT', 'HOLD', or 'up'/'down')
+    // optimization comes from ProfitMaximizer
+
+    let commandAction;
+    if (tradeDirection?.toUpperCase() === 'LONG' || tradeDirection?.toLowerCase() === 'up') {
+        commandAction = 'go_long';
+    } else if (tradeDirection?.toUpperCase() === 'SHORT' || tradeDirection?.toLowerCase() === 'down') {
+        commandAction = 'go_short';
+    } else {
+        // If direction is 'HOLD' or undefined, no trade command should be generated.
+        // This case should ideally be filtered out before calling generateTradeCommand.
+        logger.warn('generateTradeCommand called with neutral/undefined direction:', tradeDirection);
+        return null;
+    }
+
     return {
-      command: optimization.direction === 'up' ? 'go_long' : optimization.direction === 'down' ? 'go_short' : optimization.direction,
-      instrument: optimization.instrument || 'NQ',
+      command: commandAction,
+      instrument: optimization.instrument || instrument || 'NQ', // Fallback to NQ
       quantity: positionSize,
-      price: optimization.entryPrice || optimization.price,
-      stop_price: optimization.stopLoss || optimization.optimalStopLoss,
-      target_price: optimization.takeProfit || optimization.optimalExit,
-      reason: 'Bombproof AI Trade',
-      confidence: optimization.confidence,
-      expectedProfit: optimization.expectedProfit
+      price: optimization.entryPrice || optimization.price, // ProfitMaximizer provides entryPrice
+      stop_price: optimization.stopPrice, // ProfitMaximizer provides stopPrice
+      target_price: optimization.targetPrice, // ProfitMaximizer provides targetPrice
+      reason: `Bombproof AI Trade (${tradeDirection})`,
+      confidence: optimization.confidence, // Confidence from ProfitMaximizer's perspective
+      expectedProfit: optimization.expectedProfit, // From ProfitMaximizer
+      // Include other relevant fields from optimization if needed by NinjaTraderService
+      // e.g., optimization.marketRegime, optimization.riskRewardRatio
+      aiSystemData: { // Encapsulate AI specific data
+        marketRegime: optimization.marketRegime,
+        riskRewardRatio: optimization.riskRewardRatio,
+        winProbability: optimization.winProbability, // If available from earlier step
+        expectedValue: optimization.expectedValue, // If available
+        optimizationReasoning: optimization.reasoning // Array of strings
+      }
     };
   }
 
@@ -1068,11 +1095,108 @@ class BombproofAITradingSystem extends EventEmitter {
       
       this.emit('tradeCompleted', result);
     }
+    // Remove from active manual trades if it was one
+    if (this.activeManualTradeIds.has(tradeId)) {
+      this.activeManualTradeIds.delete(tradeId);
+      logger.info(`Removed manual trade ${tradeId} from active monitoring.`);
+    }
   }
 
   async checkForTrailingStopUpdate(tradeId, position) {
-    // Placeholder for trailing stop logic
-    logger.debug('Checking trailing stop for trade:', tradeId);
+    // Implementation for trailing stop logic
+    const trade = this.executedTrades.get(tradeId);
+    if (!trade || !this.smartTrailing) { // Ensure smartTrailing is available
+      logger.warn('Trade not found or smartTrailing module not available for trailing stop update', { tradeId });
+      return;
+    }
+
+    try {
+      // Assuming 'position' is the most up-to-date position state from getCurrentPositionState
+      // And 'trade' holds the initial trade parameters.
+      // We need full market data. This might need to be fetched or passed in.
+      // For now, let's assume 'position' contains necessary market context like current price and ATR.
+      // This is a simplification; typically, you'd fetch fresh market data.
+      const marketData = {
+        price: position.currentPrice, // currentPrice should be updated in position object
+        atr: position.atr || (await this.dataCollector?.getLatestATR(trade.instrument)), // Fetch latest ATR
+        // Include other necessary market data fields: volume, rsi, EMAs, adx, timestamp
+        // These might need to be fetched from dataCollector or another source
+        // For simplicity, we'll use what might be available or mock them
+        volume: position.volume || 1000,
+        rsi: position.rsi || 50,
+        ema5: position.ema5 || position.currentPrice,
+        ema8: position.ema8 || position.currentPrice,
+        ema13: position.ema13 || position.currentPrice,
+        ema21: position.ema21 || position.currentPrice,
+        ema50: position.ema50 || position.currentPrice,
+        adx: position.adx || 25,
+        timestamp: new Date().toISOString(),
+        instrument: trade.instrument,
+      };
+
+      // Ensure critical marketData fields are present
+      if (!marketData.price || !marketData.atr) {
+        logger.warn('Insufficient market data for smart trailing calculation', { tradeId, marketData });
+        return;
+      }
+
+      const positionData = {
+        instrument: trade.instrument,
+        direction: trade.direction?.toUpperCase().includes('LONG') ? 'LONG' : trade.direction?.toUpperCase().includes('SHORT') ? 'SHORT' : position.direction,
+        entryPrice: trade.fillPrice || trade.price,
+        currentPrice: marketData.price,
+        current_smart_stop: position.current_smart_stop || trade.stop_price, // Use current stop from position if available
+        quantity: trade.quantity,
+        profitPercent: position.unrealizedPnL && trade.fillPrice ? (position.unrealizedPnL / (trade.fillPrice * trade.quantity)) * 100 : 0,
+        timeInPosition: position.entryTime ? (Date.now() - new Date(position.entryTime).getTime()) / 60000 : 0, // In minutes
+        isManual: trade.isManual || false, // IMPORTANT: This needs to be set correctly when trade is initiated
+      };
+
+      logger.debug('Calculating smart trailing stop for trade:', { tradeId, positionData, marketData });
+
+      const newTrailingStopInfo = await this.smartTrailing.calculateOptimalTrailingStop(positionData, marketData);
+
+      if (newTrailingStopInfo && newTrailingStopInfo.stopPrice && newTrailingStopInfo.stopPrice !== positionData.current_smart_stop) {
+        logger.info('New smart trailing stop calculated:', {
+          tradeId,
+          oldStop: positionData.current_smart_stop,
+          newStop: newTrailingStopInfo.stopPrice,
+          algorithm: newTrailingStopInfo.algorithm,
+        });
+
+        // Update the position's current_smart_stop
+        // This assumes positionManager can update this or it's updated directly on the position object
+        if (this.positionManager) {
+            this.positionManager.updatePositionStop(trade.instrument, newTrailingStopInfo.stopPrice);
+        } else {
+            position.current_smart_stop = newTrailingStopInfo.stopPrice; // Fallback if no position manager
+        }
+
+        // Send command to NinjaTrader to update the stop loss
+        // This requires a command like 'modify_order' or similar in ninjaService
+        if (this.ninjaService) {
+          this.ninjaService.sendTradingCommand({
+            command: 'modify_stop', // This command type needs to be supported by NinjaTrader script
+            instrument: trade.instrument,
+            tradeId: tradeId, // Or orderId if applicable
+            new_stop_price: newTrailingStopInfo.stopPrice,
+            reason: `SmartTrailing update (${newTrailingStopInfo.algorithm})`,
+          });
+        }
+        // Update the trade record as well
+        this.executedTrades.set(tradeId, {
+            ...trade,
+            stop_price: newTrailingStopInfo.stopPrice,
+            current_smart_stop: newTrailingStopInfo.stopPrice,
+            active_trailing_algorithm: newTrailingStopInfo.algorithm // Store the algorithm
+        });
+
+      } else {
+        logger.debug('Smart trailing stop unchanged or invalid', { tradeId, currentStop: positionData.current_smart_stop });
+      }
+    } catch (error) {
+      logger.error('Error in checkForTrailingStopUpdate:', { tradeId, error: error.message, stack: error.stack });
+    }
   }
 
   async checkEmergencyExitConditions(tradeId, position) {
@@ -1401,6 +1525,56 @@ class BombproofAITradingSystem extends EventEmitter {
     }
     
     return null;
+  }
+
+  async handleNewManualTrade(tradeDetails) {
+    // This method is called when a manual trade (especially AI-optimized) is placed from the UI
+    // Its purpose is to register this trade with the system for monitoring,
+    // particularly for smart trailing using its manual logic.
+    logger.info('Handling new manual trade for monitoring and smart trailing:', tradeDetails);
+
+    const tradeId = tradeDetails.tradeId; // Assuming tradeDetails includes a unique tradeId
+
+    if (!tradeId) {
+        logger.error('Cannot handle new manual trade: tradeId is missing', tradeDetails);
+        return;
+    }
+    this.activeManualTradeIds.add(tradeId); // Add to set of active manual trades
+
+    // Store this trade in executedTrades or a similar map for monitoring
+    // The structure should be compatible with what startTradeMonitoring expects.
+    // We might not have full execution details yet (like fillPrice),
+    // so this record might be preliminary and updated upon NT execution confirmation.
+    this.executedTrades.set(tradeId, {
+      ...tradeDetails, // Contains instrument, direction, quantity, price, stop_price, isManual, etc.
+      status: 'pending_confirmation_for_monitoring', // Or directly to 'executed' if UI implies immediate execution intent
+      timestamp: new Date(), // Or from tradeDetails if it has a client-side timestamp
+      // Ensure it has `isManual: true`
+    });
+
+    // Start monitoring for this manual trade.
+    // This will use the updated checkForTrailingStopUpdate which respects the `isManual` flag.
+    // We need to ensure that `positionManager` is also updated with this trade's details.
+    // This might happen upon receiving a tradeExecution event from NinjaTraderService.
+    // For now, let's assume that the position will be updated, and monitoring can begin.
+
+    // It's crucial that getCurrentPositionState() can accurately reflect this new manual position
+    // once it's live, so that checkForTrailingStopUpdate gets correct data.
+    // This often means waiting for an execution confirmation from NinjaTrader.
+    // However, we can optimistically start monitoring or queue it.
+
+    // Let's assume for now that startTradeMonitoring can handle a trade that is pending execution
+    // or rely on execution confirmation to fully activate.
+    // The critical part is that `trade.isManual` is true for this trade.
+    this.startTradeMonitoring(tradeId);
+
+    logger.info(`Monitoring initiated for manual trade ${tradeId}. SmartTrailing will use manual logic.`);
+
+    // Potentially, update positionManager if it's not solely reliant on NT updates
+    if (this.positionManager) {
+        // This is simplified; actual update would need more details and confirmation logic
+        this.positionManager.trackManualPosition(tradeDetails);
+    }
   }
 }
 
