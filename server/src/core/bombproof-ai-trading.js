@@ -1587,10 +1587,11 @@ class BombproofAITradingSystem extends EventEmitter {
     logger.info(`Monitoring initiated for manual trade ${tradeId}. SmartTrailing will use manual logic.`);
 
     // Potentially, update positionManager if it's not solely reliant on NT updates
-    if (this.positionManager) {
-        // This is simplified; actual update would need more details and confirmation logic
-        this.positionManager.trackManualPosition(tradeDetails);
-    }
+    // if (this.positionManager) {
+    //     // This is simplified; actual update would need more details and confirmation logic
+    //     // this.positionManager.trackManualPosition(tradeDetails); // Removed: trackManualPosition is not a defined method
+    // }
+    // PositionManager should be updated via the standard trade execution confirmation flow.
   }
 }
 
