@@ -286,11 +286,11 @@ class MLTradingServer {
                 // Use Profit Maximizer if available
                 if (this.profitMaximizer && this.profitMaximizer.isInitialized) {
                     try {
-                        const tradeData = {
+                        const tradeDataForPM = {
                             direction: direction,
                             quantity: quantity || 1,
-                            entryPrice: current_price,
-                            instrument: 'ES'
+                            price: parseFloat(current_price), // Use 'price' to align
+                            instrument: 'ES' // Or make this configurable
                         };
 
                         const accountData = {

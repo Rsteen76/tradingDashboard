@@ -333,14 +333,30 @@ class BombproofAITradingSystem extends EventEmitter {
       if (!this.profitMaximizer?.isInitialized) {
         throw new Error('Profit maximizer not available');
       }
-      
+      const determinedTradeDirection = predictions.direction; // e.g., 'LONG' or 'SHORT'
+
       const optimization = await this.profitMaximizer.optimizeForMaximumProfit(
-        {
-          ...marketData,
-          predictions,
-          currentPosition: positionState
+        { // This is `tradeData` for ProfitMaximizer
+          ...marketData, // Includes price, atr, etc.
+          direction: determinedTradeDirection, // Explicitly pass the determined direction
+          predictions, // Full predictions object, if PM needs more detail from it
+          currentPosition: positionState,
+          instrument: marketData.instrument // Ensure instrument is available directly
         },
-        positionState,
+        // positionState here is used as `marketData` by ProfitMaximizer's internal calls like classifyMarketRegime
+        // This is okay if positionState contains necessary market fields or if PM primarily uses the first arg's marketData.
+        // Let's clarify what ProfitMaximizer expects as its second `marketData` argument.
+        // ProfitMaximizer's optimizeForMaximumProfit(tradeData, marketData, accountData)
+        // - marketData (2nd arg) is used for classifyMarketRegime(marketData)
+        // - tradeData (1st arg) is used for predictProfit(tradeData, marketData, marketRegime) -> here marketData is 2nd arg.
+        // So, `positionState` being passed as `marketData` to `classifyMarketRegime` might be an issue if it doesn't have full market picture.
+        // It's safer if ProfitMaximizer consistently uses the market data portion of its first `tradeData` argument.
+        // OR, ensure `positionState` (if it's meant to be a snapshot of market data at position evaluation time) is comprehensive.
+
+        // For now, the main fix is ensuring `tradeData.direction` is set.
+        // The second argument to PM (positionState) might need re-evaluation if PM's market regime analysis is poor.
+        // Let's assume marketData (from the first argument to PM) is the primary source for market features within PM.
+        marketData, // Pass the comprehensive marketData as the second argument as well for clarity in PM.
         this.getAccountInfo()
       );
       
