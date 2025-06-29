@@ -58,12 +58,12 @@ class PositionManager extends EventEmitter {
         
         // Add smart trailing data for manual trades
         const smartTrailingData = {
-            current_smart_stop: position.stopLoss || 0,
-            active_trailing_algorithm: position.isManual ? 'adaptive_atr' : position.algorithm || 'none',
+            current_smart_stop: position.stopLoss || position.current_smart_stop || 0,
+            active_trailing_algorithm: position.isManual || position.isManualTrade ? 'manual_adaptive_atr' : position.algorithm || 'none',
             smart_trailing_active: true,
-            trailing_confidence_threshold: 0.6,
-            trailing_update_interval: 15,
-            max_stop_movement_atr: 0.5,
+            trailing_confidence_threshold: position.isManual || position.isManualTrade ? 0.7 : 0.6, // Higher confidence for manual trades
+            trailing_update_interval: position.isManual || position.isManualTrade ? 10 : 15, // More frequent updates for manual trades
+            max_stop_movement_atr: position.isManual || position.isManualTrade ? 0.75 : 0.5, // Allow larger movements for manual trades
             last_trailing_update: Date.now()
         };
 
@@ -250,6 +250,21 @@ class PositionManager extends EventEmitter {
         this.mockMLPosition = null;
         this.mockUpdateSuccess = true;
         this.removeAllListeners();
+    }
+
+    // ================================
+    // UNIFIED TRADE HELPER
+    // Allows Bombproof unified trade system to update positions through a
+    // dedicated method name while re-using the existing updatePosition logic.
+    // ================================
+    updateUnifiedPosition(instrument, position) {
+        // Ensure the unified flags are retained
+        const unifiedPosition = {
+            ...position,
+            managementType: position.managementType || 'UNIFIED',
+            strategyIndependent: true
+        };
+        return this.updatePosition(instrument, unifiedPosition);
     }
 }
 

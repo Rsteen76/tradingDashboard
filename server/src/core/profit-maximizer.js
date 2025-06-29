@@ -347,20 +347,34 @@ class ProfitMaximizer extends EventEmitter {
     console.log('💰 Optimizing trade for maximum profit...');
     
     try {
+      console.log('🧠 Starting AI-powered profit optimization...');
+      console.log('🔧 AI Models Status:', {
+        profitPredictor: !!this.models.profitPredictor,
+        timingOptimizer: !!this.models.timingOptimizer,
+        positionSizer: !!this.models.positionSizer,
+        riskAdjuster: !!this.models.riskAdjuster,
+        marketRegimeClassifier: !!this.models.marketRegimeClassifier
+      });
+      
       // Classify current market regime
       const marketRegime = await this.classifyMarketRegime(marketData);
+      console.log('🎯 Market Regime Analysis:', marketRegime);
       
       // Predict profit potential
       const profitPrediction = await this.predictProfit(tradeData, marketData, marketRegime);
+      console.log('💰 AI Profit Prediction:', profitPrediction);
       
       // Optimize timing
       const timingOptimization = await this.optimizeTiming(tradeData, marketData);
+      console.log('⏰ AI Timing Optimization:', timingOptimization);
       
       // Calculate optimal position size
       const positionSizing = await this.calculateOptimalPositionSize(tradeData, accountData, profitPrediction);
+      console.log('📊 AI Position Sizing:', positionSizing);
       
       // Adjust risk parameters
       const riskAdjustment = await this.adjustRiskParameters(tradeData, marketData, marketRegime);
+      console.log('🛡️ AI Risk Adjustment:', riskAdjustment);
       
       // Combine all optimizations
       const optimization = this.combineOptimizations({

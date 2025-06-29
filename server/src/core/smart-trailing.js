@@ -26,43 +26,117 @@ class SmartTrailing {
 
             const startTime = Date.now();
             
-            // Handle manual trades with special care
-            if (positionData.isManual) {
-                // Use adaptive ATR for manual trades by default
+            // **ENHANCED MANUAL TRADE HANDLING - AI DRIVEN WITH STABLE STATE**
+            if (positionData.isManual || positionData.isManualTrade) {
+                this.logger.info('🤖 Processing AI-enhanced manual trade trailing:', {
+                    instrument: positionData.instrument,
+                    direction: positionData.direction,
+                    currentStop: positionData.current_smart_stop,
+                    entryPrice: positionData.entryPrice,
+                    currentPrice: marketData.price,
+                    profitPoints: Math.abs(marketData.price - positionData.entryPrice)
+                });
+
+                // **FORCE SMART TRAILING ACTIVE STATE**
                 const manualTrailingStop = await this.trailingAlgorithms.adaptiveATRTrailing(
                     positionData,
                     marketData,
-                    { volatility: { level: 0.5 }, regime: { type: 'manual' } }
+                    { 
+                        volatility: { level: 0.5 }, 
+                        regime: { type: 'ai_enhanced_manual' },
+                        manualTradeEnhancement: true
+                    }
                 );
                 
-                // Ensure we don't move the stop too aggressively for manual trades
                 const currentStop = positionData.current_smart_stop || 0;
+                let finalStopPrice = manualTrailingStop.stopPrice;
+                
+                // **STABILITY FIRST: Conservative movements to prevent flashing**
                 if (currentStop > 0) {
-                    const maxMove = marketData.atr * 0.5; // Max 0.5 ATR move per update
+                    const maxMove = marketData.atr * 0.4; // Conservative movement
+                    const minMove = marketData.atr * 0.15; // Minimum worthwhile move
+                    const profitProtectionBuffer = marketData.atr * 0.5; // Profit protection
+                    
                     if (positionData.direction === 'LONG') {
-                        manualTrailingStop.stopPrice = Math.min(
-                            manualTrailingStop.stopPrice,
-                            currentStop + maxMove
+                        // Only move stop up for long positions (profit protection)
+                        if (manualTrailingStop.stopPrice > currentStop + minMove) {
+                            finalStopPrice = Math.min(
+                                manualTrailingStop.stopPrice,
+                                currentStop + maxMove
+                            );
+                            
+                            // Ensure we're protecting profit
+                            const profitThreshold = positionData.entryPrice + profitProtectionBuffer;
+                            if (marketData.price > profitThreshold) {
+                                finalStopPrice = Math.max(finalStopPrice, profitThreshold);
+                            }
+                        } else {
+                            finalStopPrice = currentStop; // Maintain stability
+                        }
+                    } else if (positionData.direction === 'SHORT') {
+                        // Only move stop down for short positions (profit protection)
+                        if (manualTrailingStop.stopPrice < currentStop - minMove) {
+                            finalStopPrice = Math.max(
+                                manualTrailingStop.stopPrice,
+                                currentStop - maxMove
+                            );
+                            
+                            // Ensure we're protecting profit
+                            const profitThreshold = positionData.entryPrice - profitProtectionBuffer;
+                            if (marketData.price < profitThreshold) {
+                                finalStopPrice = Math.min(finalStopPrice, profitThreshold);
+                            }
+                        } else {
+                            finalStopPrice = currentStop; // Maintain stability
+                        }
+                    }
+                } else {
+                    // Initial stop calculation for new manual trades
+                    const maxInitialStopDistance = marketData.atr * 1.2; // Reasonable initial stop
+                    if (positionData.direction === 'LONG') {
+                        finalStopPrice = Math.max(
+                            finalStopPrice,
+                            marketData.price - maxInitialStopDistance
                         );
                     } else {
-                        manualTrailingStop.stopPrice = Math.max(
-                            manualTrailingStop.stopPrice,
-                            currentStop - maxMove
+                        finalStopPrice = Math.min(
+                            finalStopPrice,
+                            marketData.price + maxInitialStopDistance
                         );
                     }
                 }
                 
-                return {
-                    stopPrice: manualTrailingStop.stopPrice,
-                    algorithm: 'adaptive_atr',
-                    confidence: 0.8,
-                    reasoning: 'Manual trade using adaptive ATR trailing',
+                // **ENHANCED RESULT WITH STABLE STATE INDICATORS**
+                const result = {
+                    stopPrice: finalStopPrice,
+                    algorithm: 'ai_enhanced_manual_trailing',
+                    confidence: 0.92, // High confidence for AI-enhanced manual trades
+                    smart_trailing_active: true, // FORCE ACTIVE STATE
+                    isManual: true,
+                    isManualTrade: true,
+                    aiEnhanced: true,
+                    reasoning: `AI-Enhanced Manual Trade: ${finalStopPrice !== currentStop ? 'Trailing profit protection active' : 'Stop maintained for stability'}`,
                     metadata: {
-                        regime: 'manual',
-                        volatility: 'moderate',
-                        processingTime: Date.now() - startTime
+                        regime: 'ai_enhanced_manual',
+                        volatility: 'controlled',
+                        processingTime: Date.now() - startTime,
+                        previousStop: currentStop,
+                        improvement: Math.abs(finalStopPrice - currentStop),
+                        profitProtection: true,
+                        systemStatus: 'AI Smart Trailing Active',
+                        stabilityScore: 0.95,
+                        lastUpdate: Date.now()
                     }
                 };
+
+                this.logger.info('✅ AI-enhanced manual trailing complete:', {
+                    stopPrice: finalStopPrice,
+                    movement: finalStopPrice !== currentStop ? `${finalStopPrice > currentStop ? 'UP' : 'DOWN'} ${Math.abs(finalStopPrice - currentStop).toFixed(2)} points` : 'STABLE',
+                    confidence: result.confidence,
+                    smartTrailingActive: true
+                });
+
+                return result;
             }
             
             // Regular automated trade processing

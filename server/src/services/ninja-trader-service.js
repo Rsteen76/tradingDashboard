@@ -339,7 +339,8 @@ class NinjaTraderService extends EventEmitter {
   // Method to send trading commands (from your existing logic)
   sendTradingCommand(command) {
     const sent = this.broadcast({
-      type: 'command',
+      type: 'unified_trade_command',
+      executionType: 'TRADE_ONLY',
       timestamp: new Date().toISOString(),
       ...command
     });

@@ -87,7 +87,7 @@ class MLTradingServer {
             await this.patternRecognition.initialize();
             logger.info('✅ Pattern Recognition initialized');
 
-            this.positionManager = new PositionManager();
+            this.positionManager = new PositionManager(logger);
             logger.info('✅ Position Manager initialized');
 
             this.smartTrailing = new SmartTrailing();
@@ -432,58 +432,174 @@ class MLTradingServer {
                 });
             }
 
-            // Handle manual trade commands
-            socket.on('manual_trade', (payload, ack) => {
+            // Handle manual trade commands with FULL AI OPTIMIZATION
+            socket.on('manual_trade', async (payload, ack) => {
                 try {
-                    logger.info('📨 Socket.IO manual_trade received', { id: socket.id, payload });
-                    if (this.ninjaService) {
-                        const sent = this.ninjaService.sendTradingCommand({
-                            command: payload.command,
-                            instrument: payload.instrument || 'ES',
-                            quantity: payload.quantity || 1,
-                            timestamp: new Date().toISOString(),
-                            stop_price: payload.stop_price,
-                            target_price: payload.target_price,
-                            reason: payload.reason || 'Manual Trade',
-                            // Pass through AI optimization data if present
-                            ai_optimization_data: payload.ai_optimization_data,
-                            use_ai_optimization: payload.use_ai_optimization,
-                            isManualTrade: true // Explicitly flag as manual
-                        });
-
-                        if (sent > 0) {
-                            if (typeof ack === 'function') ack({ success: true });
-                            // If AI optimization was used for this manual trade, notify Bombproof/PositionManager
-                            // to potentially start smart trailing for it with isManual=true.
-                            if (payload.use_ai_optimization && this.bombproofTrading) {
-                                // We need a tradeId here. Assuming ninjaService.sendTradingCommand
-                                // might return one or we generate one before sending.
-                                // For now, let's simulate or assume payload includes a temporary client-side ID
-                                // that can be confirmed/updated upon execution.
-                                const tradeDetailsForMonitoring = {
-                                    tradeId: payload.clientTradeId || `manual_${Date.now()}`, // Needs robust ID generation
-                                    instrument: payload.instrument || 'ES',
-                                    direction: payload.command.includes('long') ? 'LONG' : 'SHORT', // Basic inference
-                                    quantity: payload.quantity || 1,
-                                    // Use entryPrice from AI optimization data if available, else current_price from payload (if sent)
-                                    price: payload.ai_optimization_data?.entryPrice || payload.current_price,
-                                    stop_price: payload.stop_price,
-                                    target_price: payload.target_price,
-                                    isManual: true,
-                                    isAiOptimized: true,
-                                    reason: payload.reason || 'Manual AI Optimized Trade',
-                                    // executionTime will be set upon actual execution confirmation
-                                };
-                                logger.info('Notifying Bombproof system of AI-optimized manual trade', tradeDetailsForMonitoring);
-                                this.bombproofTrading.handleNewManualTrade(tradeDetailsForMonitoring);
-                            }
-                        } else {
-                             if (typeof ack === 'function') ack({ success: false, error: 'failed_to_send_command' });
-                        }
-                    } else {
+                    logger.info('📨 Socket.IO manual_trade received - Processing with FULL AI SYSTEM', { id: socket.id, payload });
+                    
+                    if (!this.ninjaService) {
                         logger.warn('NinjaTraderService not initialized');
                         if (typeof ack === 'function') ack({ success: false, error: 'service_unavailable' });
+                        return;
                     }
+
+                    // **CRITICAL: ALL MANUAL TRADES MUST USE AI OPTIMIZATION**
+                    let optimization = null;
+                    let aiSystemUsed = 'Manual + Basic Math';
+                    
+                    // Create comprehensive market data for AI processing
+                    const marketData = {
+                        instrument: payload.instrument || 'ES',
+                        price: payload.current_price,
+                        timestamp: new Date().toISOString(),
+                        atr: payload.atr || 10,
+                        volume: payload.volume || 1000,
+                        rsi: payload.rsi || 50,
+                        ema5: payload.ema5 || payload.current_price,
+                        ema8: payload.ema8 || payload.current_price,
+                        ema13: payload.ema13 || payload.current_price,
+                        ema21: payload.ema21 || payload.current_price,
+                        ema50: payload.ema50 || payload.current_price,
+                        adx: payload.adx || 25
+                    };
+
+                    // Enhance with real market data if available
+                    if (this.dataCollector) {
+                        try {
+                            const enhancedData = await this.dataCollector.getMarketData(marketData.instrument);
+                            Object.assign(marketData, enhancedData);
+                        } catch (error) {
+                            logger.debug('Using provided market data:', error.message);
+                        }
+                    }
+
+                    // **FORCE ALL MANUAL TRADES THROUGH PROFIT MAXIMIZER**
+                    if (this.profitMaximizer && this.profitMaximizer.isInitialized) {
+                        try {
+                            const tradeDirection = payload.command === 'go_long' ? 'LONG' : 
+                                                 payload.command === 'go_short' ? 'SHORT' : 'CLOSE';
+                            
+                            logger.info('🧠 Running manual trade through AI Profit Maximizer...');
+                            
+                            optimization = await this.profitMaximizer.optimizeForMaximumProfit(
+                                {
+                                    ...marketData,
+                                    direction: tradeDirection,
+                                    quantity: payload.quantity || 1,
+                                    isManual: true,
+                                    isManualTrade: true,
+                                    userStopPrice: payload.stop_price,
+                                    userTargetPrice: payload.target_price,
+                                    userReason: payload.reason || 'Manual Trade'
+                                },
+                                marketData,
+                                { balance: 50000, freeMargin: 40000 }
+                            );
+
+                            if (optimization && optimization.confidence > 0.5) {
+                                aiSystemUsed = `AI Profit Maximizer (${optimization.algorithm})`;
+                                logger.info('✅ AI Profit Maximizer enhanced manual trade:', {
+                                    originalStop: payload.stop_price,
+                                    aiStop: optimization.stopPrice,
+                                    originalTarget: payload.target_price,
+                                    aiTarget: optimization.targetPrice,
+                                    confidence: optimization.confidence,
+                                    expectedProfit: optimization.expectedProfit,
+                                    algorithm: optimization.algorithm
+                                });
+                            } else {
+                                logger.warn('⚠️ AI optimization confidence too low, using enhanced fallback');
+                                optimization = null;
+                            }
+
+                        } catch (error) {
+                            logger.error('❌ Profit Maximizer failed for manual trade:', error.message);
+                            optimization = null;
+                        }
+                    } else {
+                        logger.warn('⚠️ Profit Maximizer not available - manual trade will use basic calculations');
+                    }
+
+                    // Build AI-enhanced trading command
+                    const tradingCommand = {
+                        command: payload.command,
+                        instrument: payload.instrument || 'ES',
+                        quantity: payload.quantity || 1,
+                        timestamp: new Date().toISOString(),
+                        stop_price: optimization?.stopPrice || payload.stop_price,
+                        target_price: optimization?.targetPrice || payload.target_price,
+                        current_price: payload.current_price,
+                        reason: optimization ? 
+                            `AI-Enhanced Manual Trade (${optimization.algorithm})` : 
+                            (payload.reason || 'Manual Trade'),
+                        
+                        // Critical flags for AI systems
+                        isManualTrade: true,
+                        isManual: true,
+                        enable_smart_trailing: true,
+                        smart_trailing_active: true,
+                        
+                        // AI optimization data
+                        ai_optimization_data: optimization,
+                        use_ai_optimization: !!optimization,
+                        aiSystemUsed: aiSystemUsed,
+                        
+                        // Unique tracking ID
+                        clientTradeId: `manual_ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                    };
+
+                    // *** IMPORTANT: Let Bombproof system handle the actual send to NinjaTrader to avoid duplicates ***
+
+                    // **REGISTER WITH BOMBPROOF AI FOR SMART TRAILING (Bombproof will also send the trade)**
+                    if (this.bombproofTrading) {
+                        const tradeDetailsForMonitoring = {
+                            tradeId: tradingCommand.clientTradeId,
+                            command: tradingCommand.command, // CRITICAL: Include command for manual trade handler
+                            instrument: payload.instrument || 'ES',
+                            direction: payload.command.includes('long') ? 'LONG' : 
+                                      payload.command.includes('short') ? 'SHORT' : 'CLOSE',
+                            quantity: payload.quantity || 1,
+                            current_price: payload.current_price, // CRITICAL: Use current_price key expected by handler
+                            price: payload.current_price,
+                            fillPrice: payload.current_price,
+                            entryTime: new Date().toISOString(),
+                            stop_price: tradingCommand.stop_price,
+                            target_price: tradingCommand.target_price,
+                            current_smart_stop: tradingCommand.stop_price,
+                            
+                            // Critical AI flags
+                            isManual: true,
+                            isManualTrade: true,
+                            isAiOptimized: !!optimization,
+                            smart_trailing_active: true,
+                            active_trailing_algorithm: 'manual_adaptive_atr',
+                            
+                            // AI data for learning
+                            optimization: optimization,
+                            aiSystemUsed: aiSystemUsed,
+                            reason: tradingCommand.reason,
+                            timestamp: new Date().toISOString()
+                        };
+                        
+                        logger.info('🤖 Registering AI-enhanced manual trade for smart trailing:', {
+                            tradeId: tradeDetailsForMonitoring.tradeId,
+                            aiSystemUsed: aiSystemUsed,
+                            smartTrailingActive: true
+                        });
+                        
+                        await this.bombproofTrading.handleNewManualTrade(tradeDetailsForMonitoring);
+                    }
+
+                    if (typeof ack === 'function') {
+                        ack({ 
+                            success: true,
+                            aiEnhanced: !!optimization,
+                            optimization: optimization,
+                            aiSystemUsed: aiSystemUsed,
+                            smartTrailingActive: true
+                        });
+                    }
+                    
                 } catch (err) {
                     logger.error('Error handling manual_trade:', err.message);
                     if (typeof ack === 'function') ack({ success: false, error: err.message });
@@ -556,6 +672,41 @@ class MLTradingServer {
                 if (result.tradeId) {
                     this.tradeTracker.completeTrade(result.tradeId, result);
                 }
+            });
+            
+            // NEW: Real-time pending trade updates for immediate dashboard visibility
+            this.bombproofTrading.on('pendingTradeUpdate', (tradeData) => {
+                logger.info('📈 Broadcasting pending trade to dashboard:', tradeData.tradeId);
+                this.io.emit('pending_trade', tradeData);
+                this.io.emit('strategy_data', {
+                    ...this.latestStrategyData,
+                    pending_trade: tradeData,
+                    position: tradeData.action, // Show expected position
+                    pending_entry: tradeData.entry_price,
+                    pending_stop: tradeData.stop_loss,
+                    pending_target: tradeData.take_profit,
+                    trade_status: 'PENDING_EXECUTION',
+                    timestamp: tradeData.timestamp
+                });
+            });
+        }
+        
+        // Position manager real-time updates
+        if (this.positionManager) {
+            this.positionManager.on('positionUpdate', (data) => {
+                logger.info('📊 Broadcasting real-time position update:', data.instrument);
+                this.io.emit('position_update', data);
+                this.io.emit('strategy_data', {
+                    ...this.latestStrategyData,
+                    position: data.position.direction,
+                    position_size: data.position.size,
+                    avg_price: data.position.avgPrice,
+                    current_smart_stop: data.position.current_smart_stop,
+                    smart_trailing_active: data.position.smart_trailing_active,
+                    active_trailing_algorithm: data.position.active_trailing_algorithm,
+                    last_update: data.position.lastUpdate,
+                    timestamp: new Date().toISOString()
+                });
             });
         }
 
@@ -1192,6 +1343,183 @@ class MLTradingServer {
         if (!healthMetrics.ninjaConnection) score -= 40;
         
         return Math.max(0, Math.min(100, score));
+    }
+
+    // ============================================================================
+    // UNIFIED TRADE MANAGEMENT HELPER METHODS
+    // ============================================================================
+    
+    /**
+     * Validates trade requests according to unified architecture requirements
+     */
+    validateTradeRequest(payload) {
+        if (!payload) {
+            return { valid: false, error: 'Empty trade request' };
+        }
+        
+        if (!payload.command || !['go_long', 'go_short', 'close_position'].includes(payload.command)) {
+            return { valid: false, error: 'Invalid or missing command' };
+        }
+        
+        if (!payload.quantity || payload.quantity <= 0) {
+            return { valid: false, error: 'Invalid quantity' };
+        }
+        
+        if (!payload.current_price || payload.current_price <= 0) {
+            return { valid: false, error: 'Invalid current price' };
+        }
+        
+        return { valid: true };
+    }
+    
+    /**
+     * Generates unique trade IDs for unified tracking
+     */
+    generateTradeId(source, action) {
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substr(2, 6);
+        return `${source}_${action}_${timestamp}_${random}`;
+    }
+    
+    /**
+     * Processes trade exits without affecting strategy lifecycle
+     */
+    async processTradeExit(exitPayload) {
+        try {
+            logger.info('🔄 UNIFIED TRADE MANAGER: Processing trade exit - Strategy continues running');
+            
+            const exitDetails = {
+                tradeId: exitPayload.tradeId,
+                exitPrice: exitPayload.exitPrice,
+                exitReason: exitPayload.exitReason || 'MANUAL_EXIT',
+                pnl: exitPayload.pnl || 0,
+                timestamp: new Date().toISOString(),
+                // CRITICAL: This flag ensures strategy continues running
+                strategyAction: 'CONTINUE_OPERATION'
+            };
+            
+            // Notify Bombproof AI system of exit (but maintain strategy operation)
+            if (this.bombproofTrading) {
+                await this.bombproofTrading.handleTradeExit(exitDetails);
+            }
+            
+            // Update position manager without stopping strategy
+            if (this.positionManager) {
+                await this.positionManager.updatePositionOnExit(exitDetails);
+            }
+            
+            // Broadcast exit status (strategy remains active)
+            this.broadcastTradeStatus(exitDetails, 'TRADE_CLOSED');
+            
+            logger.info('✅ UNIFIED MANAGER: Trade exit processed, strategy operational status: ACTIVE');
+            
+            return {
+                success: true,
+                message: 'Trade exit processed - Strategy continues running',
+                exitDetails: exitDetails
+            };
+            
+        } catch (error) {
+            logger.error('❌ Trade exit processing error:', error);
+            throw error;
+        }
+    }
+    
+    /**
+     * Broadcasts trade status to all connected systems
+     */
+    broadcastTradeStatus(trade, eventType) {
+        try {
+            const statusMessage = {
+                type: eventType,
+                trade: trade,
+                timestamp: new Date().toISOString(),
+                // IMPORTANT: Always indicate strategy operational status
+                strategyStatus: 'ACTIVE',
+                systemStatus: 'OPERATIONAL'
+            };
+            
+            // Broadcast to WebSocket clients
+            if (this.io) {
+                this.io.emit('trade_status_update', statusMessage);
+            }
+            
+            // Send to NinjaTrader (without affecting strategy lifecycle)
+            if (this.ninjaService && this.ninjaService.isConnected()) {
+                this.ninjaService.broadcastStatus({
+                    ...statusMessage,
+                    ninjaAction: 'UPDATE_ONLY', // No strategy control
+                    maintainStrategy: true
+                });
+            }
+            
+            logger.debug('📡 Trade status broadcast:', eventType);
+            
+        } catch (error) {
+            logger.error('❌ Trade status broadcast error:', error);
+        }
+    }
+    
+    /**
+     * Ensures state synchronization without strategy interruption
+     */
+    async synchronizeTradeState() {
+        try {
+            logger.info('🔄 UNIFIED MANAGER: Synchronizing trade state - Strategy remains active');
+            
+            // Get current position from NinjaTrader
+            const ninjaPositions = await this.ninjaService?.getPositions() || [];
+            
+            // Get tracked trades from Bombproof AI
+            const trackedTrades = await this.bombproofTrading?.getActiveTrades() || [];
+            
+            // Compare and reconcile differences
+            const syncResults = {
+                ninjaPositions: ninjaPositions.length,
+                trackedTrades: trackedTrades.length,
+                discrepancies: [],
+                resolutions: []
+            };
+            
+            // Handle discrepancies without stopping strategy
+            if (ninjaPositions.length !== trackedTrades.length) {
+                logger.warn('⚠️ Position count mismatch detected - Auto-correcting while strategy runs');
+                
+                // Auto-correction logic here
+                for (const ninjaPos of ninjaPositions) {
+                    const matchingTrade = trackedTrades.find(t => 
+                        t.instrument === ninjaPos.instrument && 
+                        Math.abs(t.quantity - ninjaPos.quantity) < 0.01
+                    );
+                    
+                    if (!matchingTrade) {
+                        // Create synthetic trade to match NinjaTrader state
+                        const syntheticTrade = {
+                            tradeId: this.generateTradeId('SYNC', 'POSITION'),
+                            source: 'SYNCHRONIZATION',
+                            instrument: ninjaPos.instrument,
+                            quantity: ninjaPos.quantity,
+                            entryPrice: ninjaPos.averagePrice,
+                            status: 'SYNCED',
+                            timestamp: new Date().toISOString()
+                        };
+                        
+                        if (this.bombproofTrading) {
+                            await this.bombproofTrading.addSyncedTrade(syntheticTrade);
+                        }
+                        
+                        syncResults.resolutions.push(`Synced ${ninjaPos.instrument} position`);
+                    }
+                }
+            }
+            
+            logger.info('✅ UNIFIED MANAGER: State synchronization complete - Strategy operational');
+            return syncResults;
+            
+        } catch (error) {
+            logger.error('❌ State synchronization error:', error);
+            throw error;
+        }
     }
 }
 

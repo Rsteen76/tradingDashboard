@@ -18,8 +18,13 @@ export default memo(function PositionPanel({ data, contractSpecs }: PositionPane
     const pnl = data?.pnl || 0
     const entryPrice = data?.entry_price || 0
     const currentPrice = data?.price || 0
-    const stopLoss = data?.stop_loss || 0
+    const stopLoss = data?.stop_loss || data?.current_smart_stop || 0
     const targetPrice = data?.target_price || 0
+    
+    // Check for pending trades
+    const pendingTrade = data?.pending_trade
+    const tradeStatus = data?.trade_status
+    const isPending = pendingTrade || tradeStatus === 'PENDING_EXECUTION'
     
     // Calculate position value and risk/reward with contract multiplier
     const positionValue = positionSize * currentPrice
@@ -38,7 +43,11 @@ export default memo(function PositionPanel({ data, contractSpecs }: PositionPane
     let positionColor = 'text-gray-400'
     let positionDisplay = '⏸️ FLAT'
     
-    if (isDisconnected) {
+    if (isPending) {
+      positionColor = 'text-yellow-400'
+      const pendingAction = pendingTrade?.action || position
+      positionDisplay = `⏳ ${pendingAction.toUpperCase()} PENDING`
+    } else if (isDisconnected) {
       positionColor = 'text-gray-500'
       positionDisplay = '🔌 DISCONNECTED'
     } else if (isLong) {
@@ -63,6 +72,8 @@ export default memo(function PositionPanel({ data, contractSpecs }: PositionPane
       isDisconnected,
       positionColor,
       positionDisplay,
+      isPending,
+      pendingTrade,
       formattedPnl: pnl.toFixed(2),
       formattedPositionValue: positionValue.toFixed(2),
       formattedEntryPrice: entryPrice.toFixed(2),
@@ -95,12 +106,19 @@ export default memo(function PositionPanel({ data, contractSpecs }: PositionPane
       
       <div className="space-y-4">        <div className="text-center">
           <div className="text-sm text-gray-400 mb-2">Current Position</div>
-          <div className={`text-2xl font-bold ${positionData.positionColor}`}>
+          <div className={`text-2xl font-bold ${positionData.positionColor} ${positionData.isPending ? 'animate-pulse' : ''}`}>
             {positionData.positionDisplay}
             {positionData.positionSize > 0 && !positionData.isDisconnected && (
               <span className="text-sm ml-2 text-gray-300">({positionData.positionSize})</span>
             )}
           </div>
+          {positionData.isPending && positionData.pendingTrade && (
+            <div className="text-xs text-yellow-300 mt-2">
+              Entry: {positionData.pendingTrade.entry_price} | 
+              Stop: {positionData.pendingTrade.stop_loss} | 
+              Target: {positionData.pendingTrade.take_profit}
+            </div>
+          )}
         </div>
         
         {positionData.positionSize > 0 && (

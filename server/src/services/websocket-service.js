@@ -130,7 +130,7 @@ class WebSocketService extends EventEmitter {
     });
 
     // Manual trading (from your existing manual trade handlers)
-    socket.on('manual_trade', (payload, ack) => {
+    socket.on('manual_trade', async (payload, ack) => {
       logger.info('📤 Manual trade requested:', { 
         clientId, 
         command: payload.command,
@@ -138,17 +138,24 @@ class WebSocketService extends EventEmitter {
         quantity: payload.quantity
       });
 
-      // Immediately acknowledge back to client to confirm receipt
-      if (typeof ack === 'function') {
-        try {
-          ack({ success: true, received: true })
-        } catch (err) {
-          logger.warn('Ack callback error on manual_trade:', err?.message)
+      try {
+        // Emit internal event for downstream trade execution logic
+        const result = await this.emit('manualTrade', {
+          ...payload,
+          current_price: this.latestStrategyData?.current_price
+        });
+
+        // Acknowledge success back to client
+        if (typeof ack === 'function') {
+          ack({ success: true, received: true, tradeId: result?.tradeId });
+        }
+      } catch (error) {
+        logger.error('❌ Manual trade failed:', error);
+        // Send error back to client
+        if (typeof ack === 'function') {
+          ack({ success: false, error: error.message });
         }
       }
-
-      // Emit internal event for downstream trade execution logic
-      this.emit('manualTrade', payload);
     });
 
     // Position management (from your existing position handlers)

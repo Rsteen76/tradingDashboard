@@ -8,6 +8,7 @@ import Toast from '@/components/Toast'
 import TradeDecisionPanel from '@/components/TradeDecisionPanel'
 import { AIPerformanceMonitor } from '@/components/AIPerformanceMonitor'
 import ManualTradePanel from '@/components/ManualTradePanel'
+import SmartTrailingPanel from '@/components/SmartTrailingPanel'
 
 
 
@@ -77,25 +78,6 @@ const TradingDashboard = () => {
     console.log('Updating settings:', newSettings);
     setSettings(newSettings);
     await updateServerSettings(newSettings);
-  }
-
-  const executeTrade = async (payload: { command: string; quantity?: number; instrument?: string }) => {
-    // Ensure instrument is included
-    const enrichedPayload = {
-      instrument,
-      quantity: 1,
-      ...payload,
-    }
-    try {
-      const resp = await sendManualTrade(enrichedPayload) as any
-      if (resp?.success) {
-        setTradeToast('Trade command sent')
-      } else {
-        setTradeToast('Trade failed')
-      }
-    } catch (error) {
-      setTradeToast('Trade failed')
-    }
   }
 
   // Extract data with fallbacks
@@ -263,7 +245,7 @@ const TradingDashboard = () => {
               <div className="text-xs opacity-60">{positionSize} contracts</div>
             </div>
             <div className="text-2xl font-bold">{position.toUpperCase()}</div>
-            <div className="text-sm opacity-60 mt-1">Entry: {strategyStatus.entry_price?.toFixed(2) || '--'}</div>
+            <div className="text-sm opacity-60 mt-1">Entry: {strategyStatus && typeof strategyStatus.entry_price === 'number' ? strategyStatus.entry_price.toFixed(2) : '--'}</div>
           </div>
 
           {/* Current P&L */}
@@ -535,19 +517,19 @@ const TradingDashboard = () => {
                   <div className="space-y-3 flex-1">
                     {/* Long Entry - Always present */}
                     <div className={`p-4 rounded-lg border h-[80px] flex flex-col justify-center ${
-                      strategyStatus.next_long_entry_level 
+                      strategyStatus?.next_long_entry_level 
                         ? 'bg-green-900/20 border-green-700/30' 
                         : 'bg-slate-800/20 border-slate-700/30'
                     }`}>
-                      {strategyStatus.next_long_entry_level ? (
+                      {strategyStatus?.next_long_entry_level ? (
                         <>
                           <div className="flex items-center gap-2 mb-1">
                             <ArrowUpRight className="w-4 h-4 text-green-300" />
                             <span className="text-sm text-green-300 font-medium">Long Entry</span>
                           </div>
-                          <div className="text-lg font-bold text-green-300">{strategyStatus.next_long_entry_level.toFixed(2)}</div>
+                          <div className="text-lg font-bold text-green-300">{strategyStatus?.next_long_entry_level.toFixed(2)}</div>
                           <div className="text-xs text-slate-400">
-                            {Math.abs(currentPrice - strategyStatus.next_long_entry_level).toFixed(2)} pts away
+                            {Math.abs(currentPrice - strategyStatus?.next_long_entry_level).toFixed(2)} pts away
                           </div>
                         </>
                       ) : (
@@ -560,19 +542,19 @@ const TradingDashboard = () => {
 
                     {/* Short Entry - Always present */}
                     <div className={`p-4 rounded-lg border h-[80px] flex flex-col justify-center ${
-                      strategyStatus.next_short_entry_level 
+                      strategyStatus?.next_short_entry_level 
                         ? 'bg-red-900/20 border-red-700/30' 
                         : 'bg-slate-800/20 border-slate-700/30'
                     }`}>
-                      {strategyStatus.next_short_entry_level ? (
+                      {strategyStatus?.next_short_entry_level ? (
                         <>
                           <div className="flex items-center gap-2 mb-1">
                             <ArrowDownRight className="w-4 h-4 text-red-300" />
                             <span className="text-sm text-red-300 font-medium">Short Entry</span>
                           </div>
-                          <div className="text-lg font-bold text-red-300">{strategyStatus.next_short_entry_level.toFixed(2)}</div>
+                          <div className="text-lg font-bold text-red-300">{strategyStatus?.next_short_entry_level.toFixed(2)}</div>
                           <div className="text-xs text-slate-400">
-                            {Math.abs(currentPrice - strategyStatus.next_short_entry_level).toFixed(2)} pts away
+                            {Math.abs(currentPrice - strategyStatus?.next_short_entry_level).toFixed(2)} pts away
                           </div>
                         </>
                       ) : (
@@ -681,7 +663,7 @@ const TradingDashboard = () => {
                         style={{ width: `${longProb}%` }}
                       ></div>
                     </div>
-                    <div className="text-xs text-slate-400">Entry: {strategyStatus.next_long_entry_level?.toFixed(2) || '--'}</div>
+                    <div className="text-xs text-slate-400">Entry: {strategyStatus?.next_long_entry_level?.toFixed(2) || '--'}</div>
                   </div>
                 </div>
 
@@ -709,7 +691,7 @@ const TradingDashboard = () => {
                         style={{ width: `${shortProb}%` }}
                       ></div>
                     </div>
-                    <div className="text-xs text-slate-400">Entry: {strategyStatus.next_short_entry_level?.toFixed(2) || '--'}</div>
+                    <div className="text-xs text-slate-400">Entry: {strategyStatus?.next_short_entry_level?.toFixed(2) || '--'}</div>
                   </div>
                 </div>
               </div>
@@ -725,8 +707,8 @@ const TradingDashboard = () => {
                       {getSignalDirection() !== 'NEUTRAL' && (
                         <span className="text-sm ml-2 text-slate-400">
                           @ {getSignalDirection() === 'LONG' ? 
-                            (strategyStatus.next_long_entry_level?.toFixed(2) || '--') : 
-                            (strategyStatus.next_short_entry_level?.toFixed(2) || '--')
+                            (strategyStatus?.next_long_entry_level?.toFixed(2) || '--') : 
+                            (strategyStatus?.next_short_entry_level?.toFixed(2) || '--')
                           }
                         </span>
                       )}
@@ -836,61 +818,50 @@ const TradingDashboard = () => {
               </div>
             </div>
 
-            {/* Smart Trailing */}
-            <div className="p-6 rounded-2xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/30 h-[200px] flex flex-col">
-              <div className="flex items-center gap-2 mb-4">
-                <Target className="w-5 h-5 text-purple-400" />
-                <h3 className="text-lg font-bold">Smart Trailing</h3>
-              </div>
-              
-              <div className={`p-3 rounded-lg flex items-center gap-2 mb-4 ${
-                strategyStatus?.smart_trailing_active 
-                  ? 'bg-purple-500/10 border border-purple-500/30' 
-                  : 'bg-slate-800/50 border border-slate-700/50'
-              }`}>
-                {strategyStatus?.smart_trailing_active ? (
-                  <>
-                    <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
-                    <span className="text-purple-400 font-medium">AI Active</span>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-2 h-2 bg-slate-400 rounded-full"></div>
-                    <span className="text-slate-400 font-medium">Inactive</span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex-1 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Current Stop</span>
-                  <span className="text-white font-mono">
-                    {strategyStatus?.current_smart_stop ? strategyStatus.current_smart_stop.toFixed(2) : '--'}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Algorithm</span>
-                  <span className="text-purple-400">
-                    {strategyStatus?.active_trailing_algorithm ? 
-                      strategyStatus.active_trailing_algorithm.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 
-                      'None'}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Protection</span>
-                  <span className="text-emerald-400">
-                    {strategyStatus?.current_smart_stop && strategyStatus?.entry_price && positionSize ? 
-                      formatCurrency(Math.abs(strategyStatus.current_smart_stop - strategyStatus.entry_price) * positionSize * 50) : 
-                      '$0.00'
-                    }
-                  </span>
-                </div>
-              </div>
-            </div>
+            {/* Smart Trailing Panel */}
+            <SmartTrailingPanel 
+              data={{
+                smart_trailing_enabled: true,
+                smart_trailing_active: strategyStatus?.smart_trailing_active || false,
+                current_smart_stop: strategyStatus?.current_smart_stop || 0,
+                active_trailing_algorithm: strategyStatus?.active_trailing_algorithm || 'none',
+                trailing_confidence_threshold: 0.6,
+                trailing_update_interval: 15,
+                max_stop_movement_atr: 0.5,
+                last_trailing_update: Date.now(),
+                
+                // Position Context
+                position: position,
+                position_size: positionSize,
+                entry_price: strategyStatus?.entry_price || 0,
+                current_price: currentPrice,
+                unrealized_pnl: pnl,
+                
+                // Technical Data
+                atr: marketData?.atr || 15,
+                ml_confidence_level: mlConfidence / 100,
+                ml_volatility_prediction: marketData?.volatility || 1,
+                
+                                 // Manual trade detection
+                 is_manual_trade: strategyStatus?.is_manual_trade || strategyStatus?.isManual || strategyStatus?.isManualTrade || false,
+                 manual_stop: strategyStatus?.manual_stop || 0,
+                
+                // Target information
+                target_price: strategyStatus?.target_price || 0,
+                target1: strategyStatus?.target1 || 0,
+                target2: strategyStatus?.target2 || 0,
+                
+                timestamp: new Date().toISOString()
+              }}
+              isLoading={!connectionState.isConnected}
+            />
 
             {/* Manual Trade Panel */}
             <div className="rounded-2xl border border-slate-700/50 backdrop-blur-xl bg-slate-900/30">
-              <ManualTradePanel onSend={sendManualTrade} />
+              <ManualTradePanel 
+                onSend={sendManualTrade} 
+                instrument={instrument}
+              />
             </div>
           </div>
         </div>
